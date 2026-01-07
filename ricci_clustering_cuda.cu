@@ -18,29 +18,44 @@
 // #define N_NODE 1000000
 // #define MAX_RAND_OUT_DEGREE 200
 
-#define N_NODE 1000
-#define NODES_PER_CLUSTER 100
-#define N_CLUSTERS (N_NODE / NODES_PER_CLUSTER)
-#define N_EDGES_MAX 10000
-// #define N_EDGES_MAX 25000
-// #define N_EDGES_MAX 50000
-// #define N_EDGES_MAX 100000
-// #define N_EDGES_MAX 500000  // Maximum edges to allocate
-// #define STEP_SIZE 0.0001
+// #define N_NODE 1000
+// #define NODES_PER_CLUSTER 100
+// #define N_CLUSTERS (N_NODE / NODES_PER_CLUSTER)
+// #define N_EDGES_MAX 10000
+// // #define N_EDGES_MAX 25000
+// // #define N_EDGES_MAX 50000
+// // #define N_EDGES_MAX 100000
+// // #define N_EDGES_MAX 500000  // Maximum edges to allocate
+// // #define STEP_SIZE 0.0001
 
+// // #define STEP_SIZE 0.1f
 // #define STEP_SIZE 0.1f
-#define STEP_SIZE 0.1f
 
-#define N_EDGES_TARGET 3000 // Target number of unique undirected edges
-#define N_ITERATION 10 // Number of iterations in calculating Ricci curvature
-// #define N_ITERATION 100
-// #define N_ITERATION 1 // For debugging purpose
-// #define N_ITERATION 10        // More iterations
-// #define N_ITERATION 12 
+// #define N_EDGES_TARGET 3000 // Target number of unique undirected edges
+// // #define N_ITERATION 10 // Number of iterations in calculating Ricci curvature
+// #define N_ITERATION 10
+// // #define N_ITERATION 100
+// // #define N_ITERATION 1 // For debugging purpose
+// // #define N_ITERATION 10        // More iterations
+// // #define N_ITERATION 12 
+
+#define N_NODE 500
+#define NODES_PER_CLUSTER 50
+#define N_CLUSTERS 10
+#define N_EDGES_MAX 10000
+#define P_IN 0.4
+#define P_OUT 0.001
+#define N_ITERATION 30
 
 // SBM probabilities
-#define P_IN 0.3    // Probability of edge within same cluster
-#define P_OUT 0.01  // Probability of edge between different clusters
+// #define P_IN 0.4    // Probability of edge within same cluster
+// #define P_OUT 0.001  // Probability of edge between different clusters
+
+// For faces calculation (1: face, 2: v1_nbr, 3: v2_nbr)
+#define FACES_BOTH 1
+#define FACES_V1_ONLY 2
+#define FACES_V2_ONLY 3
+
 
 #define BLOCK_SIZE 256 // CUDA maximum is 1024
 #define VERY_LARGE_NUMBER 99999
@@ -374,76 +389,76 @@ void create_sbm_graph(
     }
 }
 
-void create_random_undirected_graph(
-        int **v_adj_length,   // Pointer to pointer
-        int **v_adj_begin,
-        int **v_adj_list,
-        int **edge_src,
-        int **edge_dst,
-        int **v_adj_begin_2,
-        int *n_undirected_edges  
-    ){
-    // Create random edges for an undirected graph
-    // Then put it into adjacency list form (v_adj_list, v_adj_begin, v_adj_length)
-    // int *v_adj_length, *v_adj_begin, *v_adj_list;  
-    int idx_1, idx_2, idx;
-    float random_number; 
-    int n_total_edge=0;
-    // int n_undirected_edges=0;
+// void create_random_undirected_graph(
+//         int **v_adj_length,   // Pointer to pointer
+//         int **v_adj_begin,
+//         int **v_adj_list,
+//         int **edge_src,
+//         int **edge_dst,
+//         int **v_adj_begin_2,
+//         int *n_undirected_edges  
+//     ){
+//     // Create random edges for an undirected graph
+//     // Then put it into adjacency list form (v_adj_list, v_adj_begin, v_adj_length)
+//     // int *v_adj_length, *v_adj_begin, *v_adj_list;  
+//     int idx_1, idx_2, idx;
+//     float random_number; 
+//     int n_total_edge=0;
+//     // int n_undirected_edges=0;
 
-    *v_adj_length = (int*)malloc(N_NODE * sizeof(int));
-    *v_adj_begin = (int*)malloc(N_NODE * sizeof(int));
-    *edge_src = (int*)malloc(N_EDGES_TARGET * sizeof(int));
-    *edge_dst = (int*)malloc(N_EDGES_TARGET * sizeof(int));
+//     *v_adj_length = (int*)malloc(N_NODE * sizeof(int));
+//     *v_adj_begin = (int*)malloc(N_NODE * sizeof(int));
+//     *edge_src = (int*)malloc(N_EDGES_TARGET * sizeof(int));
+//     *edge_dst = (int*)malloc(N_EDGES_TARGET * sizeof(int));
 
-    init_zero(*v_adj_length, N_NODE);
-    init_zero(*v_adj_begin, N_NODE);
+//     init_zero(*v_adj_length, N_NODE);
+//     init_zero(*v_adj_begin, N_NODE);
 
-    init_zero(*edge_src, N_EDGES_TARGET);
-    init_zero(*edge_dst, N_EDGES_TARGET);
+//     init_zero(*edge_src, N_EDGES_TARGET);
+//     init_zero(*edge_dst, N_EDGES_TARGET);
 
-    n_total_edge=0;
-    *n_undirected_edges=0;
-    for (idx_1=0; idx_1<N_NODE; idx_1++){
-        for (idx_2=idx_1+1; idx_2<N_NODE; idx_2++){
-            random_number = (float)rand()/(float)(RAND_MAX); // Float between 0.0 and 1.0            
-            if (random_number <= 0.5){
-                (*edge_src)[*n_undirected_edges] = idx_1;
-                (*edge_dst)[*n_undirected_edges] = idx_2;
+//     n_total_edge=0;
+//     *n_undirected_edges=0;
+//     for (idx_1=0; idx_1<N_NODE; idx_1++){
+//         for (idx_2=idx_1+1; idx_2<N_NODE; idx_2++){
+//             random_number = (float)rand()/(float)(RAND_MAX); // Float between 0.0 and 1.0            
+//             if (random_number <= 0.5){
+//                 (*edge_src)[*n_undirected_edges] = idx_1;
+//                 (*edge_dst)[*n_undirected_edges] = idx_2;
 
-                (*v_adj_length)[idx_1]++;
-                (*v_adj_length)[idx_2]++;
+//                 (*v_adj_length)[idx_1]++;
+//                 (*v_adj_length)[idx_2]++;
 
-                (*n_undirected_edges)++; 
-            }
-            if (*n_undirected_edges >= N_EDGES_TARGET){
-                break;
-            }
-        }
-        if (*n_undirected_edges >= N_EDGES_TARGET){
-            break;
-        }
-    }
-    n_total_edge = *n_undirected_edges * 2;
-    *v_adj_list = (int*)malloc(n_total_edge * sizeof(int));
-    init_zero(*v_adj_list, n_total_edge);
+//                 (*n_undirected_edges)++; 
+//             }
+//             if (*n_undirected_edges >= N_EDGES_TARGET){
+//                 break;
+//             }
+//         }
+//         if (*n_undirected_edges >= N_EDGES_TARGET){
+//             break;
+//         }
+//     }
+//     n_total_edge = *n_undirected_edges * 2;
+//     *v_adj_list = (int*)malloc(n_total_edge * sizeof(int));
+//     init_zero(*v_adj_list, n_total_edge);
 
-    prefix_sum_exclusive(*v_adj_length, *v_adj_begin, N_NODE);    
-    *v_adj_begin_2 = (int*)malloc(N_NODE * sizeof(int));
-    memcpy(*v_adj_begin_2, *v_adj_begin, N_NODE * sizeof(int));
+//     prefix_sum_exclusive(*v_adj_length, *v_adj_begin, N_NODE);    
+//     *v_adj_begin_2 = (int*)malloc(N_NODE * sizeof(int));
+//     memcpy(*v_adj_begin_2, *v_adj_begin, N_NODE * sizeof(int));
 
-    for (idx=0; idx<*n_undirected_edges; idx++){
-        // a -> b first. Then b -> a
-        idx_1 = (*v_adj_begin_2)[(*edge_src)[idx]];
-        idx_2 = (*v_adj_begin_2)[(*edge_dst)[idx]];
+//     for (idx=0; idx<*n_undirected_edges; idx++){
+//         // a -> b first. Then b -> a
+//         idx_1 = (*v_adj_begin_2)[(*edge_src)[idx]];
+//         idx_2 = (*v_adj_begin_2)[(*edge_dst)[idx]];
 
-        (*v_adj_list)[idx_1] = (*edge_dst)[idx];        
-        (*v_adj_list)[idx_2] = (*edge_src)[idx];
+//         (*v_adj_list)[idx_1] = (*edge_dst)[idx];        
+//         (*v_adj_list)[idx_2] = (*edge_src)[idx];
 
-        (*v_adj_begin_2)[(*edge_src)[idx]]++;
-        (*v_adj_begin_2)[(*edge_dst)[idx]]++;
-    }
-}
+//         (*v_adj_begin_2)[(*edge_src)[idx]]++;
+//         (*v_adj_begin_2)[(*edge_dst)[idx]]++;
+//     }
+// }
 
 int verify_graph(int *edge_src, int *edge_dst, int n_undirected_edges,
                  int *v_adj_list, int *v_adj_begin, int *v_adj_length) {
@@ -559,7 +574,7 @@ __global__ void calc_forman_ricci_curvature(
             if (v == v2){
                 continue;
             }
-            ev1_sum += (w_v1 / sqrt(w_e*d_edge_weight[d_v_adj_begin[v1] + j]));
+            ev1_sum += (w_v1 / sqrtf(w_e*d_edge_weight[d_v_adj_begin[v1] + j]));
         }
 
         for (j=0; j<d_v_adj_length[v2]; j++){
@@ -567,21 +582,256 @@ __global__ void calc_forman_ricci_curvature(
             if (v == v1){
                 continue;
             }
-            ev2_sum += (w_v2 / sqrt(w_e*d_edge_weight[d_v_adj_begin[v2] + j]));
+            ev2_sum += (w_v2 / sqrtf(w_e*d_edge_weight[d_v_adj_begin[v2] + j]));
         }
 
         d_edge_curvature[idx_v1_v2_adj_list] = w_e * (w_v1 / w_e + w_v2 / w_e - (ev1_sum + ev2_sum));
         d_edge_curvature[idx_v2_v1_adj_list] = d_edge_curvature[idx_v1_v2_adj_list];
-
         
         idx += gridDim.x*blockDim.x;
     }
 }
 
+
+// For faces calculation (1: face, 2: v1_nbr, 3: v2_nbr)
+__global__ void find_faces_in_graph(
+        int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,
+        int *d_edge_src, int *d_edge_dst,
+        int *d_faces,
+        int *d_n_triangles,
+        int n_undirected_edges
+        ){    
+    int idx = threadIdx.x + blockDim.x * blockIdx.x;
+    // int tid = threadIdx.x;
+
+    // int neighbor_idx;
+    int j;
+    int v1;
+    int v2;
+    int v;    
+    int face_idx_base;    
+
+    while (idx < n_undirected_edges){
+        // Inspecting idx-th edge
+        v1 = d_edge_src[idx];
+        v2 = d_edge_dst[idx];
+
+        face_idx_base = idx*N_NODE; 
+
+        // Pass 1: Mark all v1 neighbors as V1_ONLY
+        for (j=0; j<d_v_adj_length[v1]; j++){
+            v = d_v_adj_list[d_v_adj_begin[v1] + j];
+            if (v == v2){
+                continue;                
+            }
+            if (d_faces[face_idx_base+v] == 0){
+                d_faces[face_idx_base+v] = FACES_V1_ONLY;
+            }             
+        }
+
+        // Pass 2: Check v2 neighbors
+        for (j = 0; j < d_v_adj_length[v2]; j++) {
+            v = d_v_adj_list[d_v_adj_begin[v2] + j];
+            if (v == v1){
+                continue;                
+            }
+            if (d_faces[face_idx_base+v] == 0){
+                d_faces[face_idx_base+v] = FACES_V2_ONLY;                
+            } else if (d_faces[face_idx_base+v] == FACES_V1_ONLY){
+                d_faces[face_idx_base+v] = FACES_BOTH;
+                d_n_triangles[idx]++;
+            }
+        }
+        idx += gridDim.x*blockDim.x;
+    }
+
+}
+
+__global__ void calc_augmented_forman_ricci_curvature(
+        int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,
+        int *d_edge_src, int *d_edge_dst,
+        int *d_faces,
+        int *d_n_triangles,
+        float *d_edge_weight, float *d_edge_curvature,        
+        int n_undirected_edges
+        ){    
+    int idx = threadIdx.x + blockDim.x * blockIdx.x;
+
+    while (idx < n_undirected_edges){
+        int v1 = d_edge_src[idx];
+        int v2 = d_edge_dst[idx];
+        int face_idx_base = idx * N_NODE; 
+
+        // Find edge indices
+        int idx_v1_v2 = -1, idx_v2_v1 = -1;
+        for (int j = 0; j < d_v_adj_length[v1]; j++){
+            if (d_v_adj_list[d_v_adj_begin[v1] + j] == v2){
+                idx_v1_v2 = d_v_adj_begin[v1] + j;
+                break;
+            }
+        }
+        for (int j = 0; j < d_v_adj_length[v2]; j++){
+            if (d_v_adj_list[d_v_adj_begin[v2] + j] == v1){
+                idx_v2_v1 = d_v_adj_begin[v2] + j;
+                break;
+            }
+        }
+
+        float w_e = d_edge_weight[idx_v1_v2];
+        
+        // ============================================
+        // FIXED: Compute triangle contribution properly
+        // ============================================
+        float triangle_contrib = 0.0f;
+        
+        // Iterate over v1's neighbors to find triangles
+        for (int j = 0; j < d_v_adj_length[v1]; j++){
+            int n = d_v_adj_list[d_v_adj_begin[v1] + j];
+            if (n == v2) continue;
+            
+            // Check if n is also a neighbor of v2 (forms triangle)
+            if (d_faces[face_idx_base + n] == FACES_BOTH) {
+                // Found a triangle: v1-v2-n
+                float w1 = d_edge_weight[d_v_adj_begin[v1] + j];  // edge v1-n
+                
+                // Find weight of edge v2-n
+                float w2 = 1.0f;
+                for (int k = 0; k < d_v_adj_length[v2]; k++){
+                    if (d_v_adj_list[d_v_adj_begin[v2] + k] == n){
+                        w2 = d_edge_weight[d_v_adj_begin[v2] + k];
+                        break;
+                    }
+                }
+                
+                // Heron's formula
+                float s = (w_e + w1 + w2) / 2.0f;
+                float area_sq = s * (s - w_e) * (s - w1) * (s - w2);
+                float w_tri = (area_sq > 0.0f) ? sqrtf(area_sq) : 0.0001f;
+                
+                triangle_contrib += w_e / w_tri;
+            }
+        }
+        
+        // Vertex contribution
+        float sum_ve = 2.0f / w_e;
+        
+        // Parallel edge contribution (non-triangle neighbors)
+        float sum_veeh = 0.0f;
+        
+        for (int j = 0; j < d_v_adj_length[v1]; j++){
+            int v = d_v_adj_list[d_v_adj_begin[v1] + j];
+            if (d_faces[face_idx_base + v] == FACES_V1_ONLY){
+                float w_ep = d_edge_weight[d_v_adj_begin[v1] + j];
+                sum_veeh += 1.0f / sqrtf(w_e * w_ep);
+            }            
+        }
+
+        for (int j = 0; j < d_v_adj_length[v2]; j++){
+            int v = d_v_adj_list[d_v_adj_begin[v2] + j];
+            if (d_faces[face_idx_base + v] == FACES_V2_ONLY){
+                float w_ep = d_edge_weight[d_v_adj_begin[v2] + j];
+                sum_veeh += 1.0f / sqrtf(w_e * w_ep);
+            }            
+        }
+
+        // Final curvature
+        float curvature = w_e * (triangle_contrib + sum_ve - sum_veeh);
+        
+        d_edge_curvature[idx_v1_v2] = curvature;
+        d_edge_curvature[idx_v2_v1] = curvature;
+        
+        idx += gridDim.x * blockDim.x;
+    }
+}
+
+// __global__ void calc_augmented_forman_ricci_curvature(
+//         int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,
+//         int *d_edge_src, int *d_edge_dst,
+//         int *d_faces,
+//         int *d_n_triangles,
+//         float *d_edge_weight, float*d_edge_curvature,        
+//         int n_undirected_edges
+//         ){    
+//     int idx = threadIdx.x + blockDim.x * blockIdx.x;
+//     // int tid = threadIdx.x;
+
+//     // int neighbor_idx;
+//     int j;
+//     int v1;
+//     int v2;
+//     int v;
+//     int idx_v1_v2_adj_list;
+//     int idx_v2_v1_adj_list;
+//     float w_e, w_f, w_v1, w_v2;
+//     float sum_ehef;  // Always 0 for triangles
+//     float sum_ef;
+//     float sum_ve;
+//     float sum_veeh;
+//     int face_idx_base; 
+
+//     while (idx < n_undirected_edges){
+//         // Inspecting idx-th edge
+//         v1 = d_edge_src[idx];
+//         v2 = d_edge_dst[idx];
+
+//         face_idx_base = idx*N_NODE; 
+
+//         // Find edge (v1 -> v2) in v1's adjacency list
+//         for (j=0; j<d_v_adj_length[v1]; j++){
+//             v = d_v_adj_list[d_v_adj_begin[v1] + j];
+//             if (v == v2){
+//                 // continue;
+//                 idx_v1_v2_adj_list = d_v_adj_begin[v1] + j;
+//                 break;
+//             }
+//         }
+
+//         // Find edge (v2 -> v1) in v2's adjacency list
+//         idx_v2_v1_adj_list = -1;
+//         for (j = 0; j < d_v_adj_length[v2]; j++) {
+//             if (d_v_adj_list[d_v_adj_begin[v2] + j] == v1) {
+//                 idx_v2_v1_adj_list = d_v_adj_begin[v2] + j;
+//                 break;
+//             }
+//         }
+
+//         w_e = d_edge_weight[idx_v1_v2_adj_list];
+//         // w_f = 1.0;
+//         w_f = 0.4330127f;
+//         w_v1 = 1.0;
+//         w_v2 = 1.0;
+//         sum_ef = ((float) d_n_triangles[idx])*(w_e/w_f);
+//         sum_ve = 2.0/w_e;
+        
+//         sum_ehef = 0.0;  // Always 0 for triangles
+//         sum_veeh = 0.0;
+        
+//         for (j=0; j<d_v_adj_length[v1]; j++){
+//             v = d_v_adj_list[d_v_adj_begin[v1] + j];
+//             if (d_faces[face_idx_base+v] == FACES_V1_ONLY){
+//                 sum_veeh += (w_v1 / (sqrtf(w_e*d_edge_weight[d_v_adj_begin[v1] + j])));
+//             }            
+//         }
+
+//         for (j=0; j<d_v_adj_length[v2]; j++){
+//             v = d_v_adj_list[d_v_adj_begin[v2] + j];
+//             if (d_faces[face_idx_base+v] == FACES_V2_ONLY){
+//                 sum_veeh += (w_v2 / (sqrtf(w_e*d_edge_weight[d_v_adj_begin[v2] + j])));
+//             }            
+//         }
+
+//         d_edge_curvature[idx_v1_v2_adj_list] = w_e * (sum_ef + sum_ve - fabsf(sum_ehef - sum_veeh));
+//         d_edge_curvature[idx_v2_v1_adj_list] = d_edge_curvature[idx_v1_v2_adj_list];
+        
+//         idx += gridDim.x*blockDim.x;
+//     }
+// }
+
 __global__ void update_weight(
         int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,
         int *d_edge_src, int *d_edge_dst,
         float *d_edge_weight, float*d_edge_curvature,
+        float adaptive_size,
         int n_undirected_edges
         ){    
     int idx = threadIdx.x + blockDim.x * blockIdx.x;
@@ -616,8 +866,8 @@ __global__ void update_weight(
                 break;
             }
         }
-        w_new = (1-STEP_SIZE*d_edge_curvature[idx_v1_v2_adj_list])*d_edge_weight[idx_v1_v2_adj_list];
-        // w_new = (1+STEP_SIZE*d_edge_curvature[idx_v1_v2_adj_list])*d_edge_weight[idx_v1_v2_adj_list];
+        // w_new = (1-STEP_SIZE*d_edge_curvature[idx_v1_v2_adj_list])*d_edge_weight[idx_v1_v2_adj_list];        
+        w_new = (1-adaptive_size*d_edge_curvature[idx_v1_v2_adj_list])*d_edge_weight[idx_v1_v2_adj_list];        
         
         // Clamp to prevent negative weights
         if (w_new < 0.0001f) w_new = 0.0001f;
@@ -669,12 +919,18 @@ __global__ void array_sum_blockwise(
 __global__ void normalize_weights(
         float *d_edge_weight,
         float total_weight,
+        int n_undirected_edges, // Number of UNDIRECTED edges
         int n_total_edge
 ) {
     int idx = threadIdx.x + blockDim.x * blockIdx.x;
     
+    // Scale factor to preserve average weight
+    // total_weight is sum of both directions, so divide by 2 for undirected sum
+    float scale = (float)n_undirected_edges / (total_weight / 2.0f);
+
     while (idx < n_total_edge) {
-        d_edge_weight[idx] = d_edge_weight[idx] / total_weight;
+        // d_edge_weight[idx] = d_edge_weight[idx] / total_weight;
+        d_edge_weight[idx] = d_edge_weight[idx] * scale;
         idx += gridDim.x * blockDim.x;
     }
 }
@@ -794,8 +1050,10 @@ int find_connected_components_cpu_reference(
                 float w = edge_weight[idx];
                 
                 // Only traverse edge if weight <= threshold (not a bridge)
-                if (w <= threshold && component_id[neighbor] == -1) {
+                // if (w <= threshold && component_id[neighbor] == -1) {
                 // if (w >= threshold && component_id[neighbor] == -1){
+                if (w < threshold && component_id[neighbor] == -1) {
+                // if (w > threshold && component_id[neighbor] == -1){
                     component_id[neighbor] = n_components;
                     queue[queue_end++] = neighbor;
                 }
@@ -952,7 +1210,8 @@ void find_communities_ricci_cpu_reference(
 
 
 int main(){
-    srand(time(NULL));
+    // srand(time(NULL));
+    srand(42);
     int n_block;
     int *edge_src, *edge_dst;
     int idx, iter, i, j, k, idx_1;
@@ -1046,25 +1305,95 @@ int main(){
     cudaMalloc(&d_partial_sum, n_block * sizeof(float));
     cudaCheckErrors("cudaMalloc for d_partial_sum failed");
 
+    // Precompute faces, v1_nbr - face and v2_nbr - face for each edge
+    // Note:  O(|E|x|V|) storage.
+    int *d_faces; // 1: face, 2: v1_nbr, 3: v2_nbr
+    cudaMalloc(&d_faces, n_undirected_edges*N_NODE*sizeof(int));
+    cudaCheckErrors("cudaMalloc for d_faces failed");
+    cudaMemset(d_faces, 0, n_undirected_edges * N_NODE * sizeof(int));
+    cudaCheckErrors("cudaMemset for d_faces to zero failed");
+
+    int *d_n_triangles;
+    cudaMalloc(&d_n_triangles, n_undirected_edges*sizeof(int));
+    cudaCheckErrors("cudaMalloc for d_n_triangles failed");
+    cudaMemset(d_n_triangles, 0, n_undirected_edges* sizeof(int));
+    cudaCheckErrors("cudaMemset for d_n_triangles to zero failed"); 
+
+    n_block = (n_undirected_edges + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    find_faces_in_graph<<<n_block, BLOCK_SIZE>>>(
+        d_v_adj_list, d_v_adj_begin, d_v_adj_length,
+        d_edge_src, d_edge_dst,
+        d_faces,
+        d_n_triangles,
+        n_undirected_edges);
+    cudaDeviceSynchronize();
+    cudaCheckErrors("find_faces_in_graph failed");
+
+    // Optional: Print triangle statistics
+    int *h_n_triangles = (int*)malloc(n_undirected_edges * sizeof(int));
+    cudaMemcpy(h_n_triangles, d_n_triangles, n_undirected_edges * sizeof(int), cudaMemcpyDeviceToHost);
+    
+    int total_triangles = 0;
+    int max_triangles = 0;
+    int edges_with_triangles = 0;
+    for (int i = 0; i < n_undirected_edges; i++) {
+        total_triangles += h_n_triangles[i];
+        if (h_n_triangles[i] > max_triangles) max_triangles = h_n_triangles[i];
+        if (h_n_triangles[i] > 0) edges_with_triangles++;
+    }
+    printf("Triangle statistics:\n");
+    printf("  Total triangle-edge incidences: %d\n", total_triangles);
+    printf("  Unique triangles (approx): %d\n", total_triangles / 3);  // Each triangle counted 3 times
+    printf("  Edges with triangles: %d / %d (%.1f%%)\n", 
+           edges_with_triangles, n_undirected_edges, 
+           100.0 * edges_with_triangles / n_undirected_edges);
+    printf("  Max triangles per edge: %d\n", max_triangles);
+    free(h_n_triangles);
+
     // Calculate Ricci curvature, update then normalize weights
     for (iter=0; iter<N_ITERATION; iter++){
-        n_block = (n_undirected_edges+BLOCK_SIZE-1)/BLOCK_SIZE; 
-        calc_forman_ricci_curvature<<<n_block, BLOCK_SIZE>>>(
+        // n_block = (n_undirected_edges+BLOCK_SIZE-1)/BLOCK_SIZE; 
+        // calc_forman_ricci_curvature<<<n_block, BLOCK_SIZE>>>(
+        //     d_v_adj_list, d_v_adj_begin, d_v_adj_length,
+        //     d_edge_src, d_edge_dst,
+        //     d_edge_weight, d_edge_curvature,
+        //     n_undirected_edges);
+        // cudaCheckErrors("Kernel launch failed");
+        // cudaDeviceSynchronize();
+
+        // Calculate AUGMENTED Forman-Ricci curvature
+        n_block = (n_undirected_edges + BLOCK_SIZE - 1) / BLOCK_SIZE; 
+        calc_augmented_forman_ricci_curvature<<<n_block, BLOCK_SIZE>>>(
             d_v_adj_list, d_v_adj_begin, d_v_adj_length,
             d_edge_src, d_edge_dst,
+            d_faces,
+            d_n_triangles,
             d_edge_weight, d_edge_curvature,
             n_undirected_edges);
-        cudaCheckErrors("Kernel launch failed");
         cudaDeviceSynchronize();
+        cudaCheckErrors("calc_augmented_forman_ricci_curvature failed");
 
         cudaMemcpy(h_edge_curvature, d_edge_curvature, n_total_edge*sizeof(float), cudaMemcpyDeviceToHost);
         cudaCheckErrors("Copy from d_edge_curvature to h_edge_curvature failed.");
         
+        // After computing curvature, find max absolute value
+        float max_curv = 0.0f;
+        for (int i = 0; i < n_total_edge; i++) {
+            float abs_curv = fabsf(h_edge_curvature[i]);
+            if (abs_curv > max_curv) max_curv = abs_curv;
+        }
+
+        // Adaptive step size (as in paper)
+        float adaptive_step = 1.0f / (1.1f * max_curv + 1e-10f);
+        if (adaptive_step > 1.0f) adaptive_step = 1.0f;  // Cap at 1.0
+
+        printf("Iter %d: max_curv=%.2f, step=%.6f\n", iter, max_curv, adaptive_step);
+
         // DEBUG: Check weights AFTER update, BEFORE normalization
         if (iter == N_ITERATION - 1) {  // Only on last iteration
-            cudaMemcpy(h_edge_weight, d_edge_weight, n_total_edge * sizeof(double), cudaMemcpyDeviceToHost);
+            cudaMemcpy(h_edge_weight, d_edge_weight, n_total_edge * sizeof(float), cudaMemcpyDeviceToHost);
             
-            double debug_min = 1e30, debug_max = -1e30, debug_sum = 0;
+            float debug_min = 1e30, debug_max = -1e30, debug_sum = 0;
             int zeros_count = 0;
             int at_clamp_count = 0;
             
@@ -1088,6 +1417,7 @@ int main(){
             d_v_adj_list, d_v_adj_begin, d_v_adj_length,
             d_edge_src, d_edge_dst,
             d_edge_weight, d_edge_curvature,
+            adaptive_step,   
             n_undirected_edges);
         cudaCheckErrors("Kernel launch for update_weight failed");
         cudaDeviceSynchronize();
@@ -1109,7 +1439,7 @@ int main(){
 
         n_block = (n_total_edge + BLOCK_SIZE - 1) / BLOCK_SIZE;
         normalize_weights<<<n_block, BLOCK_SIZE>>>(
-            d_edge_weight, edge_weight_sum, n_total_edge);
+            d_edge_weight, edge_weight_sum, n_undirected_edges, n_total_edge);
         cudaDeviceSynchronize();
 
         clamp_weights_after_norm<<<n_block, BLOCK_SIZE>>>(d_edge_weight, n_total_edge);
@@ -1117,9 +1447,9 @@ int main(){
 
         // DEBUG: Check weights AFTER normalization
         if (iter == N_ITERATION - 1) {
-            cudaMemcpy(h_edge_weight, d_edge_weight, n_total_edge * sizeof(double), cudaMemcpyDeviceToHost);
+            cudaMemcpy(h_edge_weight, d_edge_weight, n_total_edge * sizeof(float), cudaMemcpyDeviceToHost);
             
-            double debug_min = 1e30, debug_max = -1e30;
+            float debug_min = 1e30, debug_max = -1e30;
             int zeros_count = 0;
             
             for (int i = 0; i < n_total_edge; i++) {
@@ -1136,6 +1466,53 @@ int main(){
         }
 
         printf("Iteration %d: sum_weights = %.4f\n", iter, edge_weight_sum);
+
+        if (iter == 0) {
+            cudaMemcpy(h_edge_curvature, d_edge_curvature, n_total_edge * sizeof(float), cudaMemcpyDeviceToHost);
+            
+            float curv_min = 1e30f, curv_max = -1e30f;
+            float curv_sum = 0.0f;
+            int pos_count = 0, neg_count = 0;
+            
+            float intra_curv_sum = 0.0f, inter_curv_sum = 0.0f;
+            int intra_count = 0, inter_count = 0;
+            
+            for (int i = 0; i < n_undirected_edges; i++) {
+                int s = edge_src[i];
+                int d = edge_dst[i];
+                
+                // Find curvature (need to look up in adjacency)
+                float curv = 0.0f;
+                for (int j = 0; j < v_adj_length[s]; j++) {
+                    if (v_adj_list[v_adj_begin[s] + j] == d) {
+                        curv = h_edge_curvature[v_adj_begin[s] + j];
+                        break;
+                    }
+                }
+                
+                if (curv < curv_min) curv_min = curv;
+                if (curv > curv_max) curv_max = curv;
+                curv_sum += curv;
+                if (curv > 0) pos_count++; else neg_count++;
+                
+                if (node_cluster[s] == node_cluster[d]) {
+                    intra_curv_sum += curv;
+                    intra_count++;
+                } else {
+                    inter_curv_sum += curv;
+                    inter_count++;
+                }
+            }
+            
+            printf("\n=== Curvature Statistics (Iter 0) ===\n");
+            printf("Min curvature: %.4f\n", curv_min);
+            printf("Max curvature: %.4f\n", curv_max);
+            printf("Avg curvature: %.4f\n", curv_sum / n_undirected_edges);
+            printf("Positive: %d, Negative: %d\n", pos_count, neg_count);
+            printf("Intra-cluster avg curvature: %.4f\n", intra_curv_sum / intra_count);
+            printf("Inter-cluster avg curvature: %.4f\n", inter_curv_sum / inter_count);
+            printf("Expected: Intra > Inter (intra edges have more triangles)\n\n");
+        }
     }
 
     // Copy final weights back
@@ -1327,55 +1704,333 @@ int main(){
     // free(component_id);
 
     
-    printf("\n=== Cutoff Search (maximum resolution) ===\n");
-    printf("%-18s %-12s %-12s\n", "Threshold", "Communities", "Modularity");
+
+    // // =========================================================================
+    // // Threshold Search
+    // // =========================================================================
+    // printf("\n=== Cutoff Search (full range) ===\n");
+    // printf("%-15s %-12s %-12s\n", "Threshold", "Communities", "Modularity");
+
+    // int *component_id = (int*)malloc(N_NODE * sizeof(int));
+    // float best_modularity = -1.0f;
+    // int best_communities = 0;
+    // float best_threshold = 0.0f;
+
+    // // Search with logarithmic spacing to cover the huge range
+    // float log_min = log10f(min_w + 1e-15f);  // Avoid log(0)
+    // float log_max = log10f(max_w);
+
+    // for (int i = 0; i <= 100; i++) {
+    //     // Logarithmic interpolation
+    //     float log_thresh = log_min + (log_max - log_min) * i / 100.0f;
+    //     float threshold = powf(10.0f, log_thresh);
+        
+    //     int n_communities = find_connected_components_cpu_reference(
+    //         v_adj_list, v_adj_begin, v_adj_length,
+    //         h_edge_weight, threshold, component_id, N_NODE);
+        
+    //     float modularity = calculate_modularity_cpu_reference(
+    //         v_adj_list, v_adj_begin, v_adj_length,
+    //         component_id, N_NODE, n_undirected_edges);
+        
+    //     // Only print if we have reasonable number of communities
+    //     if (n_communities >= 2 && n_communities <= 100) {
+    //         printf("%.10e  %-12d %-12.6f", threshold, n_communities, modularity);
+            
+    //         if (modularity > best_modularity) {
+    //             best_modularity = modularity;
+    //             best_communities = n_communities;
+    //             best_threshold = threshold;
+    //             printf(" *");
+    //         }
+    //         printf("\n");
+    //     }
+    // }
+
+    // printf("\n=== Best Result ===\n");
+    // printf("Best threshold: %.10e\n", best_threshold);
+    // printf("Best communities: %d\n", best_communities);
+    // printf("Best modularity: %.6f\n", best_modularity);
+    // printf("Ground truth: %d clusters\n", N_CLUSTERS);
+
+    // // =========================================================================
+    // // Fine Search for Exactly 10 Communities
+    // // =========================================================================
+    // printf("\n=== Fine Search for %d Communities ===\n", N_CLUSTERS);
+
+    // int found_target = 0;
+    // for (int i = 0; i <= 10000; i++) {
+    //     float log_thresh = log_min + (log_max - log_min) * i / 10000.0f;
+    //     float threshold = powf(10.0f, log_thresh);
+        
+    //     int n_communities = find_connected_components_cpu_reference(
+    //         v_adj_list, v_adj_begin, v_adj_length,
+    //         h_edge_weight, threshold, component_id, N_NODE);
+        
+    //     if (n_communities == N_CLUSTERS && !found_target) {
+    //         float modularity = calculate_modularity_cpu_reference(
+    //             v_adj_list, v_adj_begin, v_adj_length,
+    //             component_id, N_NODE, n_undirected_edges);
+    //         printf("Found %d communities at threshold %.10e (modularity: %.6f)\n", 
+    //             N_CLUSTERS, threshold, modularity);
+    //         found_target = 1;
+            
+    //         // Update best if this is better
+    //         if (modularity > best_modularity - 0.01f) {  // Allow slight modularity drop
+    //             best_threshold = threshold;
+    //             best_communities = N_CLUSTERS;
+    //             best_modularity = modularity;
+    //         }
+    //     }
+    // }
+
+    // if (!found_target) {
+    //     printf("Could not find exactly %d communities\n", N_CLUSTERS);
+    // }
+
+    // // =========================================================================
+    // // Cluster Mapping Analysis
+    // // =========================================================================
+    // printf("\n=== Cluster Mapping Analysis ===\n");
+
+    // // Get the best partition
+    // find_connected_components_cpu_reference(
+    //     v_adj_list, v_adj_begin, v_adj_length,
+    //     h_edge_weight, best_threshold, component_id, N_NODE);
+
+    // // Count how many nodes from each GT cluster go to each detected cluster
+    // int confusion[20][20] = {0};
+
+    // for (int node = 0; node < N_NODE; node++) {
+    //     int detected = component_id[node];
+    //     int gt = node_cluster[node];
+    //     if (detected >= 0 && detected < 20 && gt >= 0 && gt < 20) {
+    //         confusion[detected][gt]++;
+    //     }
+    // }
+
+    // printf("Detected\\GT ");
+    // for (int gt = 0; gt < N_CLUSTERS; gt++) {
+    //     printf("%4d ", gt);
+    // }
+    // printf("| Size\n");
+
+    // for (int det = 0; det < best_communities; det++) {
+    //     printf("Cluster %2d: ", det);
+    //     int det_size = 0;
+    //     for (int gt = 0; gt < N_CLUSTERS; gt++) {
+    //         printf("%4d ", confusion[det][gt]);
+    //         det_size += confusion[det][gt];
+    //     }
+    //     printf("| %4d\n", det_size);
+    // }
+
+    // // Calculate accuracy
+    // int correct = 0;
+    // for (int gt = 0; gt < N_CLUSTERS; gt++) {
+    //     int max_in_col = 0;
+    //     for (int det = 0; det < best_communities; det++) {
+    //         if (confusion[det][gt] > max_in_col) {
+    //             max_in_col = confusion[det][gt];
+    //         }
+    //     }
+    //     correct += max_in_col;
+    // }
+    // printf("\nAccuracy: %d / %d = %.2f%%\n", correct, N_NODE, 100.0f * correct / N_NODE);
+
+    // // After weight analysis
+    // printf("\n=== Weight Distribution by Edge Type ===\n");
+
+    // float intra_min = 1e30f, intra_max = 0.0f;
+    // float inter_min = 1e30f, inter_max = 0.0f;
+
+    // for (int e = 0; e < n_undirected_edges; e++) {
+    //     int s = edge_src[e];
+    //     int d = edge_dst[e];
+        
+    //     // Get weight
+    //     float w = 0.0f;
+    //     for (int j = 0; j < v_adj_length[s]; j++) {
+    //         if (v_adj_list[v_adj_begin[s] + j] == d) {
+    //             w = h_edge_weight[v_adj_begin[s] + j];
+    //             break;
+    //         }
+    //     }
+        
+    //     if (node_cluster[s] == node_cluster[d]) {
+    //         if (w < intra_min) intra_min = w;
+    //         if (w > intra_max) intra_max = w;
+    //     } else {
+    //         if (w < inter_min) inter_min = w;
+    //         if (w > inter_max) inter_max = w;
+    //     }
+    // }
+
+    // printf("Intra-cluster weights: min=%.4f, max=%.4f, avg=%.4f\n", 
+    //     intra_min, intra_max, intra_sum/intra_count);
+    // printf("Inter-cluster weights: min=%.4f, max=%.4f, avg=%.4f\n", 
+    //     inter_min, inter_max, inter_sum/inter_count);
+
+    // if (intra_max > inter_min) {
+    //     printf("WARNING: Distributions OVERLAP! (intra_max %.4f > inter_min %.4f)\n",
+    //         intra_max, inter_min);
+    //     printf("Overlap region: [%.4f, %.4f]\n", inter_min, intra_max);
+    // } else {
+    //     printf("GOOD: Distributions are separated! Gap: [%.4f, %.4f]\n",
+    //         intra_max, inter_min);
+    // }
+
+    // printf("\n=== Debug: Threshold Search Setup ===\n");
+    // printf("log_min = %.6f (from min_w = %.6e)\n", log_min, min_w);
+    // printf("log_max = %.6f (from max_w = %.6e)\n", log_max, max_w);
+    // printf("First threshold will be: %.6e\n", powf(10.0f, log_min));
+    // printf("Last threshold will be: %.6e\n", powf(10.0f, log_max));
+
+    // // Test a specific threshold
+    // float test_thresh = 1.0f;
+    // int test_comp = find_connected_components_cpu_reference(
+    //     v_adj_list, v_adj_begin, v_adj_length,
+    //     h_edge_weight, test_thresh, component_id, N_NODE);
+    // printf("Test: threshold=1.0 gives %d communities\n", test_comp);
+
+    // test_thresh = 2.0f;
+    // test_comp = find_connected_components_cpu_reference(
+    //     v_adj_list, v_adj_begin, v_adj_length,
+    //     h_edge_weight, test_thresh, component_id, N_NODE);
+    // printf("Test: threshold=2.0 gives %d communities\n", test_comp);
+
+    // test_thresh = 5.0f;
+    // test_comp = find_connected_components_cpu_reference(
+    //     v_adj_list, v_adj_begin, v_adj_length,
+    //     h_edge_weight, test_thresh, component_id, N_NODE);
+    // printf("Test: threshold=5.0 gives %d communities\n", test_comp);
+
+    // // Cleanup
+    // free(component_id);
+
+    // =========================================================================
+    // Threshold Search with Improved Stable Region Detection
+    // =========================================================================
+    printf("\n=== Cutoff Search (with modularity-based selection) ===\n");
+    printf("%-15s %-12s %-12s %-12s\n", "Threshold", "Communities", "Modularity", "Status");
 
     int *component_id = (int*)malloc(N_NODE * sizeof(int));
-    float best_modularity = -1.0f;
-    int best_communities = 0;
-    float best_threshold = 0.0f;
 
-    // 1.00000x to 1.00010x in tiny steps
-    for (int i = 0; i <= 100; i++) {
-        float multiplier = 1.0f + i * 0.000001f;  // 0.0001% increments
-        float threshold = min_w * multiplier;
+    float epsilon = 0.001f;       // Modularity stability threshold
+    float min_modularity = 0.8f;  // Minimum acceptable modularity
+
+    // Track the best stable region (longest consecutive same communities)
+    int best_stable_length = 0;
+    float best_stable_threshold = 0.0f;
+    int best_stable_communities = 0;
+    float best_stable_modularity = 0.0f;
+
+    // Current stable region tracking
+    int current_stable_length = 0;
+    float current_stable_start = 0.0f;
+    int prev_communities = -1;
+    float prev_modularity = -1.0f;
+
+    // Also track best modularity overall
+    float best_modularity = -1.0f;
+    float best_threshold = 0.0f;
+    int best_communities = 0;
+
+    for (int i = 0; i <= 200; i++) {
+        float threshold = min_w + (max_w - min_w) * i / 200.0f;
         
         int n_communities = find_connected_components_cpu_reference(
             v_adj_list, v_adj_begin, v_adj_length,
             h_edge_weight, threshold, component_id, N_NODE);
         
+        if (n_communities < 2 || n_communities > N_NODE / 2) {
+            prev_communities = -1;
+            current_stable_length = 0;
+            continue;
+        }
+        
         float modularity = calculate_modularity_cpu_reference(
             v_adj_list, v_adj_begin, v_adj_length,
             component_id, N_NODE, n_undirected_edges);
         
-        printf("%.16f %-12d %-12.6f", threshold, n_communities, modularity);
+        char status[64] = "";
         
-        if (modularity > best_modularity) {
-            best_modularity = modularity;
-            best_communities = n_communities;
-            best_threshold = threshold;
-            printf(" *");
+        // Track stable regions (same number of communities with similar modularity)
+        if (n_communities == prev_communities && 
+            fabsf(modularity - prev_modularity) < epsilon) {
+            current_stable_length++;
+        } else {
+            // New region started - check if previous was best
+            if (current_stable_length > best_stable_length && 
+                prev_modularity > min_modularity &&
+                prev_communities > 2) {  // Don't want trivial solutions
+                best_stable_length = current_stable_length;
+                best_stable_threshold = current_stable_start;
+                best_stable_communities = prev_communities;
+                best_stable_modularity = prev_modularity;
+            }
+            // Start new region
+            current_stable_length = 1;
+            current_stable_start = threshold;
         }
-        printf("\n");
+        
+        // Mark stable regions in output
+        if (current_stable_length == 3) {
+            sprintf(status, " ** STABLE START **");
+        } else if (current_stable_length > 3 && current_stable_length % 10 == 0) {
+            sprintf(status, " (stable x%d)", current_stable_length);
+        }
+        
+        // Track best modularity (with penalty for too few communities)
+        if (modularity > min_modularity && n_communities >= 3) {
+            if (modularity > best_modularity) {
+                best_modularity = modularity;
+                best_threshold = threshold;
+                best_communities = n_communities;
+            }
+        }
+        
+        // Print results for small community counts
+        if (n_communities <= 20) {
+            printf("%.10e  %-12d %-12.6f %s\n", threshold, n_communities, modularity, status);
+        }
+        
+        prev_communities = n_communities;
+        prev_modularity = modularity;
     }
 
-    printf("\nBest: threshold=%.16f → %d communities (modularity: %.4f)\n",
-        best_threshold, best_communities, best_modularity);
-    printf("Ground truth: %d clusters\n", N_CLUSTERS);
+    // Check final region
+    if (current_stable_length > best_stable_length && 
+        prev_modularity > min_modularity &&
+        prev_communities > 2) {
+        best_stable_length = current_stable_length;
+        best_stable_threshold = current_stable_start;
+        best_stable_communities = prev_communities;
+        best_stable_modularity = prev_modularity;
+    }
+
+    printf("\n=== Final Selection ===\n");
+    printf("Longest stable region:\n");
+    printf("  Threshold: %.10e\n", best_stable_threshold);
+    printf("  Communities: %d\n", best_stable_communities);
+    printf("  Modularity: %.6f\n", best_stable_modularity);
+    printf("  Stability length: %d consecutive thresholds\n", best_stable_length);
+
+    printf("\nHighest modularity:\n");
+    printf("  Threshold: %.10e\n", best_threshold);
+    printf("  Communities: %d\n", best_communities);
+    printf("  Modularity: %.6f\n", best_modularity);
+
+    printf("\nGround truth: %d clusters\n", N_CLUSTERS);
+
+    // Use the stable region for final clustering
+    printf("\n=== Using Stable Region Result ===\n");
+    find_connected_components_cpu_reference(
+        v_adj_list, v_adj_begin, v_adj_length,
+        h_edge_weight, best_stable_threshold, component_id, N_NODE);
 
     free(component_id);
-
-
-
-    // n_block = (n_total_edge + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    // copy_back_from_padded_array<<<n_block, BLOCK_SIZE>>> (d_edge_weight_padded, gpuArrbiton, size);
-
-    // For each threshold in the 10%, 20%, 30%, etc. 90%, etc. of the weights
-    // we now cut the graph and get the connected components
-    // then calculate the modularity and get the best results
-
     
-
     // =========================================================================
     // Cleanup - Free device memory
     // =========================================================================
