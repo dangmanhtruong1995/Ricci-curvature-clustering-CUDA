@@ -172,6 +172,49 @@ __global__ void bfs_loop_for_cc_labeling(
     }
 }
 
+__global__ void bfs_loop_using_virtual_warp_for_cc_labeling(
+        int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length, 
+        int *d_dist_arr, int *d_still_running,
+        int iteration_counter, int start_vertex,
+        int *component_list, int component_idx){
+    int idx = threadIdx.x + blockDim.x * blockIdx.x;
+    // int tid = threadIdx.x;
+    int neighbor_idx;
+    int j;
+    int vWarp_id;
+    int vWarp_offset;
+    int vertex;
+    // int temp;
+    int n1;
+    // int neighbor_index;
+
+    while (idx < N_NODE){
+        vWarp_id = idx / VWARP_SIZE;
+        vWarp_offset = idx % VWARP_SIZE;
+        
+        for (vertex=vWarp_id*VWARP_SIZE; vertex<vWarp_id*VWARP_SIZE+VWARP_SIZE; vertex++){
+            if ((vertex < N_NODE)&&(d_dist_arr[vertex] == iteration_counter)){
+                // For each vertex to be processed, the virtual warps
+                // divide the neighbors amongst themselves
+                j = 0;
+                while (((j+vWarp_offset) < d_v_adj_length[vertex])&&(j<d_v_adj_length[vertex])){
+                    n1 = vWarp_offset + j;
+                    neighbor_idx = d_v_adj_list[d_v_adj_begin[vertex] + n1];
+                    if (d_dist_arr[neighbor_idx] == VERY_LARGE_NUMBER) {
+                        d_dist_arr[neighbor_idx] = iteration_counter + 1;
+                        *d_still_running = 1;
+                        component_list[neighbor_idx] = component_idx;
+                    }
+                    j += VWARP_SIZE;
+                }
+            }
+        }
+
+        idx += gridDim.x*blockDim.x;
+    }  
+    
+} 
+
 int main(){
     srand(time(NULL));
     int n_block;
@@ -194,15 +237,15 @@ int main(){
     // Print results to verify
     printf("Generated %d undirected edges (%d directed entries)\n", n_undirected_edges, n_total_edge);
 
-    printf("\nAdjacency list:\n");
-    for (i = 0; i < N_NODE; i++) {
-        printf("Node %d, component %d\n", i, ground_truth_component[i]);
-        printf("\n");
-    }
+    // printf("\nAdjacency list:\n");
+    // for (i = 0; i < N_NODE; i++) {
+    //     printf("Node %d, component %d\n", i, ground_truth_component[i]);
+    //     printf("\n");
+    // }
 
-    for (idx=0; idx<n_undirected_edges; idx++){
-        printf("(%d, %d)\n", edge_src[idx], edge_dst[idx]);
-    }
+    // for (idx=0; idx<n_undirected_edges; idx++){
+    //     printf("(%d, %d)\n", edge_src[idx], edge_dst[idx]);
+    // }
 
     // =========================================================================
     // Allocate device memory and copy graph data to GPU
@@ -241,6 +284,7 @@ int main(){
     int h_still_running = 1;
     int *d_still_running;
     int still_has_cc=1;
+    int iteration_counter;
 
     cudaMalloc(&d_still_running, sizeof(int));
     h_dist_arr = (int*) malloc(N_NODE * sizeof(int));
@@ -272,21 +316,33 @@ int main(){
                 cudaMemcpy(d_dist_arr, h_dist_arr, N_NODE * sizeof(int), cudaMemcpyHostToDevice);    
 
                 h_still_running = 1;
+                iteration_counter = 0;
                 h_component_list[start_vertex] = component_idx;
                 cudaMemcpy(d_component_list, h_component_list, N_NODE * sizeof(int), cudaMemcpyHostToDevice);
 
                 n_block = (N_NODE+BLOCK_SIZE-1)/BLOCK_SIZE;    
                 while (h_still_running == 1){
                     h_still_running = 0;
+                    
                     cudaMemcpy(d_still_running, &h_still_running, sizeof(int), cudaMemcpyHostToDevice);
 
-                    bfs_loop_for_cc_labeling<<<n_block, BLOCK_SIZE>>>(
+                    // bfs_loop_for_cc_labeling<<<n_block, BLOCK_SIZE>>>(
+                    //     d_v_adj_list, d_v_adj_begin, d_v_adj_length, 
+                    //     d_dist_arr, d_still_running, start_vertex,
+                    //     d_component_list, component_idx);
+                    // cudaDeviceSynchronize();
+
+                    bfs_loop_using_virtual_warp_for_cc_labeling<<<n_block, BLOCK_SIZE>>>(
                         d_v_adj_list, d_v_adj_begin, d_v_adj_length, 
-                        d_dist_arr, d_still_running, start_vertex,
+                        d_dist_arr, d_still_running,
+                        iteration_counter,  
+                        start_vertex,
                         d_component_list, component_idx);
                     cudaDeviceSynchronize();
 
                     cudaMemcpy(&h_still_running, d_still_running, sizeof(int), cudaMemcpyDeviceToHost);
+
+                    iteration_counter++;
                 }
                 cudaMemcpy(h_component_list, d_component_list, N_NODE * sizeof(int), cudaMemcpyDeviceToHost);
                 component_idx += 1; // Prepare for next component search

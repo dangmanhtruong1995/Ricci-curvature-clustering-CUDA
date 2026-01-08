@@ -102,6 +102,14 @@ __global__ void init_one_on_device(float* arr, int n) {
     }
 }
 
+__global__ void init_on_device(int* arr, int n, int value) {
+    for (int idx = blockIdx.x * blockDim.x + threadIdx.x; 
+         idx < n; 
+         idx += blockDim.x * gridDim.x) {
+        arr[idx] = value;
+    }
+}
+
 void init_zero(int *arr, int size){
     int idx;
     for (idx=0; idx<size; idx++){
@@ -113,40 +121,6 @@ void prefix_sum_exclusive(int *arr, int *result, int n) {
     result[0] = 0;
     for (int i = 1; i < n; i++) {
         result[i] = result[i - 1] + arr[i - 1];
-    }
-}
-
-// =========================================================================
-// Sorting on GPU
-// =========================================================================
-__global__ void bitonicSortGPU(float* arr, int j, int k)
-{
-    unsigned int i, ij;
-
-    i = threadIdx.x + blockDim.x * blockIdx.x;
-
-    ij = i ^ j;
-
-    if (ij > i)
-    {
-        if ((i & k) == 0)
-        {
-            if (arr[i] > arr[ij])
-            {
-                float temp = arr[i];
-                arr[i] = arr[ij];
-                arr[ij] = temp;
-            }
-        }
-        else
-        {
-            if (arr[i] < arr[ij])
-            {
-                float temp = arr[i];
-                arr[i] = arr[ij];
-                arr[ij] = temp;
-            }
-        }
     }
 }
 
@@ -184,6 +158,41 @@ __global__ void copy_back_from_padded_array(float *src, float *dst, unsigned int
     while (idx < arr_size){
         dst[idx] = src[idx];
         idx += blockDim.x * gridDim.x;
+    }
+}
+
+
+// =========================================================================
+// Sorting on GPU
+// =========================================================================
+__global__ void bitonicSortGPU(float* arr, int j, int k)
+{
+    unsigned int i, ij;
+
+    i = threadIdx.x + blockDim.x * blockIdx.x;
+
+    ij = i ^ j;
+
+    if (ij > i)
+    {
+        if ((i & k) == 0)
+        {
+            if (arr[i] > arr[ij])
+            {
+                float temp = arr[i];
+                arr[i] = arr[ij];
+                arr[ij] = temp;
+            }
+        }
+        else
+        {
+            if (arr[i] < arr[ij])
+            {
+                float temp = arr[i];
+                arr[i] = arr[ij];
+                arr[ij] = temp;
+            }
+        }
     }
 }
 
@@ -303,9 +312,6 @@ __global__ void copy_back(int *input, int *output, int n) {
     }
 }
 
-
-
-
 // =========================================================================
 // Graph operations
 // =========================================================================
@@ -391,76 +397,6 @@ void create_sbm_graph(
     }
 }
 
-// void create_random_undirected_graph(
-//         int **v_adj_length,   // Pointer to pointer
-//         int **v_adj_begin,
-//         int **v_adj_list,
-//         int **edge_src,
-//         int **edge_dst,
-//         int **v_adj_begin_2,
-//         int *n_undirected_edges  
-//     ){
-//     // Create random edges for an undirected graph
-//     // Then put it into adjacency list form (v_adj_list, v_adj_begin, v_adj_length)
-//     // int *v_adj_length, *v_adj_begin, *v_adj_list;  
-//     int idx_1, idx_2, idx;
-//     float random_number; 
-//     int n_total_edge=0;
-//     // int n_undirected_edges=0;
-
-//     *v_adj_length = (int*)malloc(N_NODE * sizeof(int));
-//     *v_adj_begin = (int*)malloc(N_NODE * sizeof(int));
-//     *edge_src = (int*)malloc(N_EDGES_TARGET * sizeof(int));
-//     *edge_dst = (int*)malloc(N_EDGES_TARGET * sizeof(int));
-
-//     init_zero(*v_adj_length, N_NODE);
-//     init_zero(*v_adj_begin, N_NODE);
-
-//     init_zero(*edge_src, N_EDGES_TARGET);
-//     init_zero(*edge_dst, N_EDGES_TARGET);
-
-//     n_total_edge=0;
-//     *n_undirected_edges=0;
-//     for (idx_1=0; idx_1<N_NODE; idx_1++){
-//         for (idx_2=idx_1+1; idx_2<N_NODE; idx_2++){
-//             random_number = (float)rand()/(float)(RAND_MAX); // Float between 0.0 and 1.0            
-//             if (random_number <= 0.5){
-//                 (*edge_src)[*n_undirected_edges] = idx_1;
-//                 (*edge_dst)[*n_undirected_edges] = idx_2;
-
-//                 (*v_adj_length)[idx_1]++;
-//                 (*v_adj_length)[idx_2]++;
-
-//                 (*n_undirected_edges)++; 
-//             }
-//             if (*n_undirected_edges >= N_EDGES_TARGET){
-//                 break;
-//             }
-//         }
-//         if (*n_undirected_edges >= N_EDGES_TARGET){
-//             break;
-//         }
-//     }
-//     n_total_edge = *n_undirected_edges * 2;
-//     *v_adj_list = (int*)malloc(n_total_edge * sizeof(int));
-//     init_zero(*v_adj_list, n_total_edge);
-
-//     prefix_sum_exclusive(*v_adj_length, *v_adj_begin, N_NODE);    
-//     *v_adj_begin_2 = (int*)malloc(N_NODE * sizeof(int));
-//     memcpy(*v_adj_begin_2, *v_adj_begin, N_NODE * sizeof(int));
-
-//     for (idx=0; idx<*n_undirected_edges; idx++){
-//         // a -> b first. Then b -> a
-//         idx_1 = (*v_adj_begin_2)[(*edge_src)[idx]];
-//         idx_2 = (*v_adj_begin_2)[(*edge_dst)[idx]];
-
-//         (*v_adj_list)[idx_1] = (*edge_dst)[idx];        
-//         (*v_adj_list)[idx_2] = (*edge_src)[idx];
-
-//         (*v_adj_begin_2)[(*edge_src)[idx]]++;
-//         (*v_adj_begin_2)[(*edge_dst)[idx]]++;
-//     }
-// }
 
 int verify_graph(int *edge_src, int *edge_dst, int n_undirected_edges,
                  int *v_adj_list, int *v_adj_begin, int *v_adj_length) {
@@ -679,11 +615,7 @@ __global__ void calc_augmented_forman_ricci_curvature(
             }
         }
 
-        float w_e = d_edge_weight[idx_v1_v2];
-        
-        // ============================================
-        // FIXED: Compute triangle contribution properly
-        // ============================================
+        float w_e = d_edge_weight[idx_v1_v2];        
         float triangle_contrib = 0.0f;
         
         // Iterate over v1's neighbors to find triangles
@@ -746,89 +678,6 @@ __global__ void calc_augmented_forman_ricci_curvature(
     }
 }
 
-// __global__ void calc_augmented_forman_ricci_curvature(
-//         int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,
-//         int *d_edge_src, int *d_edge_dst,
-//         int *d_faces,
-//         int *d_n_triangles,
-//         float *d_edge_weight, float*d_edge_curvature,        
-//         int n_undirected_edges
-//         ){    
-//     int idx = threadIdx.x + blockDim.x * blockIdx.x;
-//     // int tid = threadIdx.x;
-
-//     // int neighbor_idx;
-//     int j;
-//     int v1;
-//     int v2;
-//     int v;
-//     int idx_v1_v2_adj_list;
-//     int idx_v2_v1_adj_list;
-//     float w_e, w_f, w_v1, w_v2;
-//     float sum_ehef;  // Always 0 for triangles
-//     float sum_ef;
-//     float sum_ve;
-//     float sum_veeh;
-//     int face_idx_base; 
-
-//     while (idx < n_undirected_edges){
-//         // Inspecting idx-th edge
-//         v1 = d_edge_src[idx];
-//         v2 = d_edge_dst[idx];
-
-//         face_idx_base = idx*N_NODE; 
-
-//         // Find edge (v1 -> v2) in v1's adjacency list
-//         for (j=0; j<d_v_adj_length[v1]; j++){
-//             v = d_v_adj_list[d_v_adj_begin[v1] + j];
-//             if (v == v2){
-//                 // continue;
-//                 idx_v1_v2_adj_list = d_v_adj_begin[v1] + j;
-//                 break;
-//             }
-//         }
-
-//         // Find edge (v2 -> v1) in v2's adjacency list
-//         idx_v2_v1_adj_list = -1;
-//         for (j = 0; j < d_v_adj_length[v2]; j++) {
-//             if (d_v_adj_list[d_v_adj_begin[v2] + j] == v1) {
-//                 idx_v2_v1_adj_list = d_v_adj_begin[v2] + j;
-//                 break;
-//             }
-//         }
-
-//         w_e = d_edge_weight[idx_v1_v2_adj_list];
-//         // w_f = 1.0;
-//         w_f = 0.4330127f;
-//         w_v1 = 1.0;
-//         w_v2 = 1.0;
-//         sum_ef = ((float) d_n_triangles[idx])*(w_e/w_f);
-//         sum_ve = 2.0/w_e;
-        
-//         sum_ehef = 0.0;  // Always 0 for triangles
-//         sum_veeh = 0.0;
-        
-//         for (j=0; j<d_v_adj_length[v1]; j++){
-//             v = d_v_adj_list[d_v_adj_begin[v1] + j];
-//             if (d_faces[face_idx_base+v] == FACES_V1_ONLY){
-//                 sum_veeh += (w_v1 / (sqrtf(w_e*d_edge_weight[d_v_adj_begin[v1] + j])));
-//             }            
-//         }
-
-//         for (j=0; j<d_v_adj_length[v2]; j++){
-//             v = d_v_adj_list[d_v_adj_begin[v2] + j];
-//             if (d_faces[face_idx_base+v] == FACES_V2_ONLY){
-//                 sum_veeh += (w_v2 / (sqrtf(w_e*d_edge_weight[d_v_adj_begin[v2] + j])));
-//             }            
-//         }
-
-//         d_edge_curvature[idx_v1_v2_adj_list] = w_e * (sum_ef + sum_ve - fabsf(sum_ehef - sum_veeh));
-//         d_edge_curvature[idx_v2_v1_adj_list] = d_edge_curvature[idx_v1_v2_adj_list];
-        
-//         idx += gridDim.x*blockDim.x;
-//     }
-// }
-
 __global__ void update_weight(
         int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,
         int *d_edge_src, int *d_edge_dst,
@@ -867,8 +716,7 @@ __global__ void update_weight(
                 idx_v2_v1_adj_list = d_v_adj_begin[v2] + j;
                 break;
             }
-        }
-        // w_new = (1-STEP_SIZE*d_edge_curvature[idx_v1_v2_adj_list])*d_edge_weight[idx_v1_v2_adj_list];        
+        }        
         w_new = (1-adaptive_size*d_edge_curvature[idx_v1_v2_adj_list])*d_edge_weight[idx_v1_v2_adj_list];        
         
         // Clamp to prevent negative weights
@@ -945,27 +793,147 @@ __global__ void clamp_weights_after_norm(float *d_edge_weight, int n_total_edge)
     }
 }
 
-__global__ void bfs_loop_for_cc_labeling(
-        int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length, 
-        int *d_dist_arr, int *d_still_running, int start_vertex,
-        int *component_list, int component_idx){    
+__global__ void bfs_loop_using_virtual_warp_for_cc_labeling(
+        int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,         
+        int *d_edge_src, int *d_edge_dst,
+        float *d_edge_weight,
+        int *d_dist_arr, int *d_still_running,
+        int iteration_counter, int start_vertex,
+        int *component_list, int component_idx,
+        float threshold
+    ){
     int idx = threadIdx.x + blockDim.x * blockIdx.x;
     // int tid = threadIdx.x;
     int neighbor_idx;
     int j;
+    int vWarp_id;
+    int vWarp_offset;
+    int vertex;
+    // int temp;
+    int n1;
+    // float w;
+    // int neighbor_index;
 
     while (idx < N_NODE){
-        for (j=0; j<d_v_adj_length[idx]; j++){
-            neighbor_idx = d_v_adj_list[d_v_adj_begin[idx] + j];
-            if (d_dist_arr[neighbor_idx] > (d_dist_arr[idx]+1)){
-                d_dist_arr[neighbor_idx] = d_dist_arr[idx]+1;
-                *d_still_running = 1;
-                component_list[neighbor_idx] = component_idx;
-                // atomicOr(d_still_running, 1); // Uncomment if you want guaranteed correctness
+        vWarp_id = idx / VWARP_SIZE;
+        vWarp_offset = idx % VWARP_SIZE;
+        
+        for (vertex=vWarp_id*VWARP_SIZE; vertex<vWarp_id*VWARP_SIZE+VWARP_SIZE; vertex++){
+            if ((vertex < N_NODE)&&(d_dist_arr[vertex] == iteration_counter)){
+                // For each vertex to be processed, the virtual warps
+                // divide the neighbors amongst themselves
+                j = 0;
+                while (((j+vWarp_offset) < d_v_adj_length[vertex])&&(j<d_v_adj_length[vertex])){
+                    n1 = vWarp_offset + j;
+                    neighbor_idx = d_v_adj_list[d_v_adj_begin[vertex] + n1];
+                    if ((d_dist_arr[neighbor_idx] == VERY_LARGE_NUMBER) && (d_edge_weight[d_v_adj_begin[vertex] + n1] < threshold)) {
+                        d_dist_arr[neighbor_idx] = iteration_counter + 1;
+                        *d_still_running = 1;
+                        component_list[neighbor_idx] = component_idx;
+                    }
+                    j += VWARP_SIZE;
+                }
             }
         }
         idx += gridDim.x*blockDim.x;
+    } 
+} 
+
+int bfs_loop_using_virtual_warp_for_cc_labeling_wrapper(
+    int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,         
+    int *d_edge_src, int *d_edge_dst,
+    float *d_edge_weight,
+    int *h_component_list, int *d_component_list,
+    int *d_dist_arr,
+    int *d_still_running,
+    float threshold){
+
+    int idx;
+    int n_block;
+
+    // Find connected components using BFS
+    int component_idx=0;
+    // int *h_component_list, *d_component_list;
+    // int *d_dist_arr;
+    // int *h_dist_arr;
+    int start_vertex = 0;
+    int h_still_running = 1;
+    // int *d_still_running;
+    int still_has_cc=1;
+    int iteration_counter;
+    int zero = 0;
+
+    // Initialize (needs to do this each time the function is called)
+    n_block = (N_NODE+BLOCK_SIZE-1)/BLOCK_SIZE; 
+    init_on_device<<<n_block, BLOCK_SIZE>>>(d_component_list, N_NODE, -1);    
+    cudaDeviceSynchronize();
+    cudaMemcpy(h_component_list, d_component_list, N_NODE * sizeof(int), cudaMemcpyDeviceToHost);    
+    
+    init_on_device<<<n_block, BLOCK_SIZE>>>(d_dist_arr, N_NODE, VERY_LARGE_NUMBER);
+    cudaDeviceSynchronize();
+    // cudaMemcpy(h_dist_arr, d_dist_arr, N_NODE * sizeof(int), cudaMemcpyDeviceToHost);    
+
+    h_still_running = 1;
+    cudaMemcpy(d_still_running, &h_still_running, sizeof(int), cudaMemcpyHostToDevice);
+
+    while (1){
+        still_has_cc = 0;
+        
+        for(idx = 0; idx < N_NODE; idx++){
+            if (h_component_list[idx] < 0){
+                still_has_cc = 1;
+                start_vertex = idx; 
+                // Do a BFS for this current component                
+                // for(idx_1 = 0; idx_1 < N_NODE; idx_1++) h_dist_arr[idx_1] = VERY_LARGE_NUMBER;
+                // start_vertex = idx; 
+                // h_dist_arr[start_vertex] = 0;
+                // cudaMemcpy(d_dist_arr, h_dist_arr, N_NODE * sizeof(int), cudaMemcpyHostToDevice);    
+
+                init_on_device<<<n_block, BLOCK_SIZE>>>(d_dist_arr, N_NODE, VERY_LARGE_NUMBER);
+                cudaDeviceSynchronize();
+                cudaMemcpy(&d_dist_arr[start_vertex], &zero, sizeof(int),
+                    cudaMemcpyHostToDevice);
+
+                h_still_running = 1;
+                iteration_counter = 0;
+                h_component_list[start_vertex] = component_idx;
+                cudaMemcpy(d_component_list, h_component_list, N_NODE * sizeof(int), cudaMemcpyHostToDevice);
+
+                n_block = (N_NODE+BLOCK_SIZE-1)/BLOCK_SIZE;    
+                while (h_still_running == 1){
+                    h_still_running = 0;                    
+                    cudaMemcpy(d_still_running, &h_still_running, sizeof(int), cudaMemcpyHostToDevice);
+
+                    bfs_loop_using_virtual_warp_for_cc_labeling<<<n_block, BLOCK_SIZE>>>(
+                        d_v_adj_list, d_v_adj_begin, d_v_adj_length, 
+                        d_edge_src, d_edge_dst,
+                        d_edge_weight,
+                        d_dist_arr, d_still_running,
+                        iteration_counter,  
+                        start_vertex,
+                        d_component_list, component_idx,
+                        threshold);
+                    cudaDeviceSynchronize();
+
+                    cudaMemcpy(&h_still_running, d_still_running, sizeof(int), cudaMemcpyDeviceToHost);
+
+                    iteration_counter++;
+                }
+                cudaMemcpy(h_component_list, d_component_list, N_NODE * sizeof(int), cudaMemcpyDeviceToHost);
+                component_idx += 1; // Prepare for next component search
+                continue;
+            }
+        }
+        if (still_has_cc == 0){
+            break; // No more component left
+        }
     }
+
+    // free(h_dist_arr);
+    // cudaFree(d_dist_arr);
+    // cudaFree(d_still_running);
+
+    return component_idx; // At this point this stores the number of components found
 }
 
 // =========================================================================
@@ -1216,7 +1184,7 @@ int main(){
     // srand(42);
     int n_block;
     int *edge_src, *edge_dst;
-    int idx, iter, i, j, k, idx_1;
+    int idx, iter, i, j, k;
     // int idx_1, idx_2;    
     // float random_number;
     float edge_weight_sum;
@@ -1226,16 +1194,9 @@ int main(){
     int *v_adj_length, *v_adj_begin, *v_adj_list;  
     int *v_adj_begin_2;
     float *h_partial_sum, *d_partial_sum;
-    // int *d_n_undirected_edges;
     int n_total_edge, n_undirected_edges;
-    // cudaMalloc(&d_n_undirected_edges, sizeof(int));
-
-    // create_random_undirected_graph(
-    //     &v_adj_length, &v_adj_begin, &v_adj_list,
-    //     &edge_src, &edge_dst, &v_adj_begin_2,
-    //     &n_undirected_edges);    
-
     int *node_cluster;
+
     create_sbm_graph(
         &v_adj_length, &v_adj_begin, &v_adj_list,
         &edge_src, &edge_dst, &v_adj_begin_2,
@@ -1331,26 +1292,26 @@ int main(){
     cudaDeviceSynchronize();
     cudaCheckErrors("find_faces_in_graph failed");
 
-    // Optional: Print triangle statistics
-    int *h_n_triangles = (int*)malloc(n_undirected_edges * sizeof(int));
-    cudaMemcpy(h_n_triangles, d_n_triangles, n_undirected_edges * sizeof(int), cudaMemcpyDeviceToHost);
+    // // Optional: Print triangle statistics
+    // int *h_n_triangles = (int*)malloc(n_undirected_edges * sizeof(int));
+    // cudaMemcpy(h_n_triangles, d_n_triangles, n_undirected_edges * sizeof(int), cudaMemcpyDeviceToHost);
     
-    int total_triangles = 0;
-    int max_triangles = 0;
-    int edges_with_triangles = 0;
-    for (int i = 0; i < n_undirected_edges; i++) {
-        total_triangles += h_n_triangles[i];
-        if (h_n_triangles[i] > max_triangles) max_triangles = h_n_triangles[i];
-        if (h_n_triangles[i] > 0) edges_with_triangles++;
-    }
-    printf("Triangle statistics:\n");
-    printf("  Total triangle-edge incidences: %d\n", total_triangles);
-    printf("  Unique triangles (approx): %d\n", total_triangles / 3);  // Each triangle counted 3 times
-    printf("  Edges with triangles: %d / %d (%.1f%%)\n", 
-           edges_with_triangles, n_undirected_edges, 
-           100.0 * edges_with_triangles / n_undirected_edges);
-    printf("  Max triangles per edge: %d\n", max_triangles);
-    free(h_n_triangles);
+    // int total_triangles = 0;
+    // int max_triangles = 0;
+    // int edges_with_triangles = 0;
+    // for (int i = 0; i < n_undirected_edges; i++) {
+    //     total_triangles += h_n_triangles[i];
+    //     if (h_n_triangles[i] > max_triangles) max_triangles = h_n_triangles[i];
+    //     if (h_n_triangles[i] > 0) edges_with_triangles++;
+    // }
+    // printf("Triangle statistics:\n");
+    // printf("  Total triangle-edge incidences: %d\n", total_triangles);
+    // printf("  Unique triangles (approx): %d\n", total_triangles / 3);  // Each triangle counted 3 times
+    // printf("  Edges with triangles: %d / %d (%.1f%%)\n", 
+    //        edges_with_triangles, n_undirected_edges, 
+    //        100.0 * edges_with_triangles / n_undirected_edges);
+    // printf("  Max triangles per edge: %d\n", max_triangles);
+    // free(h_n_triangles);
 
     // Calculate Ricci curvature, update then normalize weights
     for (iter=0; iter<N_ITERATION; iter++){
@@ -1363,7 +1324,6 @@ int main(){
         // cudaCheckErrors("Kernel launch failed");
         // cudaDeviceSynchronize();
 
-        // Calculate AUGMENTED Forman-Ricci curvature
         n_block = (n_undirected_edges + BLOCK_SIZE - 1) / BLOCK_SIZE; 
         calc_augmented_forman_ricci_curvature<<<n_block, BLOCK_SIZE>>>(
             d_v_adj_list, d_v_adj_begin, d_v_adj_length,
@@ -1392,28 +1352,28 @@ int main(){
         printf("Iter %d: max_curv=%.2f, step=%.6f\n", iter, max_curv, adaptive_step);
 
         // DEBUG: Check weights AFTER update, BEFORE normalization
-        if (iter == N_ITERATION - 1) {  // Only on last iteration
-            cudaMemcpy(h_edge_weight, d_edge_weight, n_total_edge * sizeof(float), cudaMemcpyDeviceToHost);
+        // if (iter == N_ITERATION - 1) {  // Only on last iteration
+        //     cudaMemcpy(h_edge_weight, d_edge_weight, n_total_edge * sizeof(float), cudaMemcpyDeviceToHost);
             
-            float debug_min = 1e30, debug_max = -1e30, debug_sum = 0;
-            int zeros_count = 0;
-            int at_clamp_count = 0;
+        //     float debug_min = 1e30, debug_max = -1e30, debug_sum = 0;
+        //     int zeros_count = 0;
+        //     int at_clamp_count = 0;
             
-            for (int i = 0; i < n_total_edge; i++) {
-                if (h_edge_weight[i] < debug_min) debug_min = h_edge_weight[i];
-                if (h_edge_weight[i] > debug_max) debug_max = h_edge_weight[i];
-                debug_sum += h_edge_weight[i];
-                if (h_edge_weight[i] == 0.0) zeros_count++;
-                if (h_edge_weight[i] <= 1e-10) at_clamp_count++;
-            }
+        //     for (int i = 0; i < n_total_edge; i++) {
+        //         if (h_edge_weight[i] < debug_min) debug_min = h_edge_weight[i];
+        //         if (h_edge_weight[i] > debug_max) debug_max = h_edge_weight[i];
+        //         debug_sum += h_edge_weight[i];
+        //         if (h_edge_weight[i] == 0.0) zeros_count++;
+        //         if (h_edge_weight[i] <= 1e-10) at_clamp_count++;
+        //     }
             
-            printf("\n=== DEBUG: After update_weight, BEFORE normalization ===\n");
-            printf("Min weight: %.20e\n", debug_min);
-            printf("Max weight: %.20e\n", debug_max);
-            printf("Sum: %.20e\n", debug_sum);
-            printf("Zeros: %d / %d\n", zeros_count, n_total_edge);
-            printf("At/below clamp (1e-10): %d / %d\n", at_clamp_count, n_total_edge);
-        }
+        //     printf("\n=== DEBUG: After update_weight, BEFORE normalization ===\n");
+        //     printf("Min weight: %.20e\n", debug_min);
+        //     printf("Max weight: %.20e\n", debug_max);
+        //     printf("Sum: %.20e\n", debug_sum);
+        //     printf("Zeros: %d / %d\n", zeros_count, n_total_edge);
+        //     printf("At/below clamp (1e-10): %d / %d\n", at_clamp_count, n_total_edge);
+        // }
 
         update_weight<<<n_block, BLOCK_SIZE>>>(
             d_v_adj_list, d_v_adj_begin, d_v_adj_length,
@@ -1448,73 +1408,73 @@ int main(){
         cudaDeviceSynchronize();
 
         // DEBUG: Check weights AFTER normalization
-        if (iter == N_ITERATION - 1) {
-            cudaMemcpy(h_edge_weight, d_edge_weight, n_total_edge * sizeof(float), cudaMemcpyDeviceToHost);
+        // if (iter == N_ITERATION - 1) {
+        //     cudaMemcpy(h_edge_weight, d_edge_weight, n_total_edge * sizeof(float), cudaMemcpyDeviceToHost);
             
-            float debug_min = 1e30, debug_max = -1e30;
-            int zeros_count = 0;
+        //     float debug_min = 1e30, debug_max = -1e30;
+        //     int zeros_count = 0;
             
-            for (int i = 0; i < n_total_edge; i++) {
-                if (h_edge_weight[i] < debug_min) debug_min = h_edge_weight[i];
-                if (h_edge_weight[i] > debug_max) debug_max = h_edge_weight[i];
-                if (h_edge_weight[i] == 0.0) zeros_count++;
-            }
+        //     for (int i = 0; i < n_total_edge; i++) {
+        //         if (h_edge_weight[i] < debug_min) debug_min = h_edge_weight[i];
+        //         if (h_edge_weight[i] > debug_max) debug_max = h_edge_weight[i];
+        //         if (h_edge_weight[i] == 0.0) zeros_count++;
+        //     }
             
-            printf("\n=== DEBUG: AFTER normalization ===\n");
-            printf("Min weight: %.20e\n", debug_min);
-            printf("Max weight: %.20e\n", debug_max);
-            printf("Normalization divisor was: %.20e\n", edge_weight_sum);
-            printf("Zeros: %d / %d\n", zeros_count, n_total_edge);
-        }
+        //     printf("\n=== DEBUG: AFTER normalization ===\n");
+        //     printf("Min weight: %.20e\n", debug_min);
+        //     printf("Max weight: %.20e\n", debug_max);
+        //     printf("Normalization divisor was: %.20e\n", edge_weight_sum);
+        //     printf("Zeros: %d / %d\n", zeros_count, n_total_edge);
+        // }
 
         printf("Iteration %d: sum_weights = %.4f\n", iter, edge_weight_sum);
 
-        if (iter == 0) {
-            cudaMemcpy(h_edge_curvature, d_edge_curvature, n_total_edge * sizeof(float), cudaMemcpyDeviceToHost);
+        // if (iter == 0) {
+        //     cudaMemcpy(h_edge_curvature, d_edge_curvature, n_total_edge * sizeof(float), cudaMemcpyDeviceToHost);
             
-            float curv_min = 1e30f, curv_max = -1e30f;
-            float curv_sum = 0.0f;
-            int pos_count = 0, neg_count = 0;
+        //     float curv_min = 1e30f, curv_max = -1e30f;
+        //     float curv_sum = 0.0f;
+        //     int pos_count = 0, neg_count = 0;
             
-            float intra_curv_sum = 0.0f, inter_curv_sum = 0.0f;
-            int intra_count = 0, inter_count = 0;
+        //     float intra_curv_sum = 0.0f, inter_curv_sum = 0.0f;
+        //     int intra_count = 0, inter_count = 0;
             
-            for (int i = 0; i < n_undirected_edges; i++) {
-                int s = edge_src[i];
-                int d = edge_dst[i];
+        //     for (int i = 0; i < n_undirected_edges; i++) {
+        //         int s = edge_src[i];
+        //         int d = edge_dst[i];
                 
-                // Find curvature (need to look up in adjacency)
-                float curv = 0.0f;
-                for (int j = 0; j < v_adj_length[s]; j++) {
-                    if (v_adj_list[v_adj_begin[s] + j] == d) {
-                        curv = h_edge_curvature[v_adj_begin[s] + j];
-                        break;
-                    }
-                }
+        //         // Find curvature (need to look up in adjacency)
+        //         float curv = 0.0f;
+        //         for (int j = 0; j < v_adj_length[s]; j++) {
+        //             if (v_adj_list[v_adj_begin[s] + j] == d) {
+        //                 curv = h_edge_curvature[v_adj_begin[s] + j];
+        //                 break;
+        //             }
+        //         }
                 
-                if (curv < curv_min) curv_min = curv;
-                if (curv > curv_max) curv_max = curv;
-                curv_sum += curv;
-                if (curv > 0) pos_count++; else neg_count++;
+        //         if (curv < curv_min) curv_min = curv;
+        //         if (curv > curv_max) curv_max = curv;
+        //         curv_sum += curv;
+        //         if (curv > 0) pos_count++; else neg_count++;
                 
-                if (node_cluster[s] == node_cluster[d]) {
-                    intra_curv_sum += curv;
-                    intra_count++;
-                } else {
-                    inter_curv_sum += curv;
-                    inter_count++;
-                }
-            }
+        //         if (node_cluster[s] == node_cluster[d]) {
+        //             intra_curv_sum += curv;
+        //             intra_count++;
+        //         } else {
+        //             inter_curv_sum += curv;
+        //             inter_count++;
+        //         }
+        //     }
             
-            printf("\n=== Curvature Statistics (Iter 0) ===\n");
-            printf("Min curvature: %.4f\n", curv_min);
-            printf("Max curvature: %.4f\n", curv_max);
-            printf("Avg curvature: %.4f\n", curv_sum / n_undirected_edges);
-            printf("Positive: %d, Negative: %d\n", pos_count, neg_count);
-            printf("Intra-cluster avg curvature: %.4f\n", intra_curv_sum / intra_count);
-            printf("Inter-cluster avg curvature: %.4f\n", inter_curv_sum / inter_count);
-            printf("Expected: Intra > Inter (intra edges have more triangles)\n\n");
-        }
+        //     printf("\n=== Curvature Statistics (Iter 0) ===\n");
+        //     printf("Min curvature: %.4f\n", curv_min);
+        //     printf("Max curvature: %.4f\n", curv_max);
+        //     printf("Avg curvature: %.4f\n", curv_sum / n_undirected_edges);
+        //     printf("Positive: %d, Negative: %d\n", pos_count, neg_count);
+        //     printf("Intra-cluster avg curvature: %.4f\n", intra_curv_sum / intra_count);
+        //     printf("Inter-cluster avg curvature: %.4f\n", inter_curv_sum / inter_count);
+        //     printf("Expected: Intra > Inter (intra edges have more triangles)\n\n");
+        // }
     }
 
     // Copy final weights back
@@ -1571,7 +1531,6 @@ int main(){
     printf("Intra-cluster: count=%d, avg_weight=%.8f\n", intra_count, intra_sum/intra_count);
     printf("Inter-cluster: count=%d, avg_weight=%.8f\n", inter_count, inter_sum/inter_count);
     printf("Ratio (intra/inter): %.4f\n", (intra_sum/intra_count)/(inter_sum/inter_count));
-
     
     // Sort the weights in ascending order
     unsigned int next_pow = next_power_of_2(n_total_edge);
@@ -1630,7 +1589,10 @@ int main(){
     printf("\n=== Cutoff Search (with modularity-based selection) ===\n");
     printf("%-15s %-12s %-12s %-12s\n", "Threshold", "Communities", "Modularity", "Status");
 
-    int *component_id = (int*)malloc(N_NODE * sizeof(int));
+    // int component_idx=0;
+    int *h_component_list, *d_component_list;
+    int *d_dist_arr;
+    int *d_still_running;
 
     float epsilon = 0.001f;       // Modularity stability threshold
     float min_modularity = 0.8f;  // Minimum acceptable modularity
@@ -1652,12 +1614,27 @@ int main(){
     float best_threshold = 0.0f;
     int best_communities = 0;
 
+    cudaMalloc(&d_still_running, sizeof(int));
+    h_component_list = (int*) malloc(N_NODE * sizeof(int));
+    cudaMalloc(&d_component_list, N_NODE * sizeof(int));  
+    cudaMalloc(&d_dist_arr, N_NODE * sizeof(int));
+
     for (int i = 0; i <= 200; i++) {
         float threshold = min_w + (max_w - min_w) * i / 200.0f;
         
-        int n_communities = find_connected_components_cpu_reference(
-            v_adj_list, v_adj_begin, v_adj_length,
-            h_edge_weight, threshold, component_id, N_NODE);
+        // int n_communities = find_connected_components_cpu_reference(
+        //     v_adj_list, v_adj_begin, v_adj_length,
+        //     h_edge_weight, threshold, h_component_list, N_NODE);
+
+        int n_communities = bfs_loop_using_virtual_warp_for_cc_labeling_wrapper(
+            d_v_adj_list, d_v_adj_begin, d_v_adj_length,
+            d_edge_src, d_edge_dst,
+            d_edge_weight,
+            h_component_list, d_component_list,
+            d_dist_arr, 
+            d_still_running,
+            threshold
+        );
         
         if (n_communities < 2 || n_communities > N_NODE / 2) {
             prev_communities = -1;
@@ -1667,7 +1644,7 @@ int main(){
         
         float modularity = calculate_modularity_cpu_reference(
             v_adj_list, v_adj_begin, v_adj_length,
-            component_id, N_NODE, n_undirected_edges);
+            h_component_list, N_NODE, n_undirected_edges);
         
         char status[64] = "";
         
@@ -1741,15 +1718,29 @@ int main(){
 
     // Use the stable region for final clustering
     printf("\n=== Using Stable Region Result ===\n");
-    find_connected_components_cpu_reference(
-        v_adj_list, v_adj_begin, v_adj_length,
-        h_edge_weight, best_stable_threshold, component_id, N_NODE);
 
-    free(component_id);
+    int n_communities = bfs_loop_using_virtual_warp_for_cc_labeling_wrapper(
+            d_v_adj_list, d_v_adj_begin, d_v_adj_length,
+            d_edge_src, d_edge_dst,
+            d_edge_weight,
+            h_component_list, d_component_list,
+            d_dist_arr, 
+            d_still_running,
+            best_stable_threshold
+        );
+    printf("%d\n", n_communities);
+
+    // find_connected_components_cpu_reference(
+    //     v_adj_list, v_adj_begin, v_adj_length,
+    //     h_edge_weight, best_stable_threshold, h_component_list, N_NODE);
+
+    // free(h_component_list);
     
     // =========================================================================
-    // Cleanup - Free device memory
+    // Cleanup
     // =========================================================================
+
+    // Device memory
     cudaFree(d_v_adj_list);
     cudaFree(d_v_adj_begin);
     cudaFree(d_v_adj_length);
@@ -1757,20 +1748,23 @@ int main(){
     cudaFree(d_edge_dst);
     cudaFree(d_edge_weight);
     cudaFree(d_edge_curvature);
-    cudaFree(d_partial_sum); 
+    cudaFree(d_partial_sum);
+    cudaFree(d_component_list);
+    cudaFree(d_dist_arr);
+    cudaFree(d_still_running);
+    cudaFree(d_edge_weight_padded);
 
-    // =========================================================================
-    // Cleanup - Free host memory
-    // =========================================================================
-    free(v_adj_length);
-    free(v_adj_begin);
+    // Host memory
     free(v_adj_list);
+    free(v_adj_begin);
     free(v_adj_begin_2);
+    free(v_adj_length);
     free(edge_src);
     free(edge_dst);
     free(h_edge_weight);
     free(h_edge_curvature);
     free(h_partial_sum);
-   
-
+    free(h_component_list);
+    free(h_sorted_weights);
+    free(h_edge_weight_padded);  
 }
