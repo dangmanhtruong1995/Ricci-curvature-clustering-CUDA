@@ -39,15 +39,22 @@
 // // #define N_ITERATION 10        // More iterations
 // // #define N_ITERATION 12 
 
-#define N_NODE 500
-#define NODES_PER_CLUSTER 50
-#define N_CLUSTERS 10
-// #define N_EDGES_MAX 10000
+// #define N_NODE 500
+// #define NODES_PER_CLUSTER 50
+// #define N_CLUSTERS 10
 #define P_IN 0.4
 #define P_OUT 0.001
-#define N_ITERATION 30
+// #define N_ITERATION 30
+// #define N_EDGES_MAX 20000
 
-#define N_EDGES_MAX 20000
+#define N_NODE 10000
+#define NODES_PER_CLUSTER 1000
+#define N_CLUSTERS 10
+// #define P_IN 0.05        // ~50 intra-cluster edges per node
+// #define P_OUT 0.0005     // ~5 inter-cluster edges per node
+#define N_ITERATION 30
+#define N_EDGES_MAX 500000  // 500K edges should be enough
+
 
 // SBM probabilities
 // #define P_IN 0.4    // Probability of edge within same cluster
@@ -891,8 +898,10 @@ int bfs_loop_using_virtual_warp_for_cc_labeling_wrapper(
 
                 init_on_device<<<n_block, BLOCK_SIZE>>>(d_dist_arr, N_NODE, VERY_LARGE_NUMBER);
                 cudaDeviceSynchronize();
-                cudaMemcpy(&d_dist_arr[start_vertex], &zero, sizeof(int),
+                cudaMemcpy(d_dist_arr + start_vertex, &zero, sizeof(int),
                     cudaMemcpyHostToDevice);
+                // cudaMemcpy(&d_dist_arr[start_vertex], &zero, sizeof(int),
+                //     cudaMemcpyHostToDevice);
 
                 h_still_running = 1;
                 iteration_counter = 0;
@@ -1204,20 +1213,20 @@ int main(){
     n_total_edge = 2*n_undirected_edges;
 
     // Print results to verify
-    printf("Generated %d undirected edges (%d directed entries)\n", n_undirected_edges, n_total_edge);
+    // printf("Generated %d undirected edges (%d directed entries)\n", n_undirected_edges, n_total_edge);
 
-    printf("\nAdjacency list:\n");
-    for (i = 0; i < N_NODE; i++) {
-        printf("Node %d: ", i);
-        for (j = 0; j < v_adj_length[i]; j++) {
-            printf("%d ", v_adj_list[v_adj_begin[i] + j]);
-        }
-        printf("\n");
-    }
+    // printf("\nAdjacency list:\n");
+    // for (i = 0; i < N_NODE; i++) {
+    //     printf("Node %d: ", i);
+    //     for (j = 0; j < v_adj_length[i]; j++) {
+    //         printf("%d ", v_adj_list[v_adj_begin[i] + j]);
+    //     }
+    //     printf("\n");
+    // }
 
-    for (idx=0; idx<n_undirected_edges; idx++){
-        printf("(%d, %d)\n", edge_src[idx], edge_dst[idx]);
-    }
+    // for (idx=0; idx<n_undirected_edges; idx++){
+    //     printf("(%d, %d)\n", edge_src[idx], edge_dst[idx]);
+    // }
 
     // Verify the graph
     verify_graph(edge_src, edge_dst, n_undirected_edges,
@@ -1271,8 +1280,17 @@ int main(){
     // Precompute faces, v1_nbr - face and v2_nbr - face for each edge
     // Note:  O(|E|x|V|) storage.
     int *d_faces; // 1: face, 2: v1_nbr, 3: v2_nbr
-    cudaMalloc(&d_faces, n_undirected_edges*N_NODE*sizeof(int));
-    cudaCheckErrors("cudaMalloc for d_faces failed");
+    // cudaMalloc(&d_faces, n_undirected_edges*N_NODE*sizeof(int));
+    // cudaCheckErrors("cudaMalloc for d_faces failed");
+    cudaError_t err = cudaMalloc(&d_faces, (size_t)n_undirected_edges * N_NODE * sizeof(int));
+    if (err != cudaSuccess) {
+        printf("Failed to allocate d_faces: %s\n", cudaGetErrorString(err));
+        printf("Requested size: %zu bytes\n", (size_t)n_undirected_edges * N_NODE * sizeof(int));
+        exit(1);
+    }
+    else {
+        printf("Allocate d_faces successfully.\n");
+    }
     cudaMemset(d_faces, 0, n_undirected_edges * N_NODE * sizeof(int));
     cudaCheckErrors("cudaMemset for d_faces to zero failed");
 
@@ -1730,6 +1748,35 @@ int main(){
         );
     printf("%d\n", n_communities);
 
+    // =========================================================================
+    // Save graph and clustering results to file
+    // =========================================================================
+    printf("\n=== Saving graph to file ===\n");
+
+    FILE *fp = fopen("graph_output.txt", "w");
+    if (fp == NULL) {
+        printf("Error: Could not open file for writing\n");
+    } else {
+        // First line: N M
+        fprintf(fp, "%d %d\n", N_NODE, n_undirected_edges);
+        
+        // Next M lines: src dst (edges)
+        for (int i = 0; i < n_undirected_edges; i++) {
+            fprintf(fp, "%d %d\n", edge_src[i], edge_dst[i]);
+        }
+        
+        // Next N lines: component assignment for each node
+        for (int i = 0; i < N_NODE; i++) {
+            fprintf(fp, "%d\n", h_component_list[i]);
+        }
+        
+        fclose(fp);
+        printf("Graph saved to graph_output.txt\n");
+        printf("  Nodes: %d\n", N_NODE);
+        printf("  Edges: %d\n", n_undirected_edges);
+        printf("  Communities: %d\n", best_stable_communities);
+    }
+
     // find_connected_components_cpu_reference(
     //     v_adj_list, v_adj_begin, v_adj_length,
     //     h_edge_weight, best_stable_threshold, h_component_list, N_NODE);
@@ -1753,6 +1800,7 @@ int main(){
     cudaFree(d_dist_arr);
     cudaFree(d_still_running);
     cudaFree(d_edge_weight_padded);
+    cudaFree(d_faces);
 
     // Host memory
     free(v_adj_list);
