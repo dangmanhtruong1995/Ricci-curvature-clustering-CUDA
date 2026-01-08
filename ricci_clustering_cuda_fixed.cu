@@ -39,21 +39,21 @@
 // // #define N_ITERATION 10        // More iterations
 // // #define N_ITERATION 12 
 
-#define N_NODE 500
-#define NODES_PER_CLUSTER 50
-#define N_CLUSTERS 10
+// #define N_NODE 500
+// #define NODES_PER_CLUSTER 50
+// #define N_CLUSTERS 10
 #define P_IN 0.4
 #define P_OUT 0.001
-#define N_ITERATION 30
-#define N_EDGES_MAX 20000
+// #define N_ITERATION 30
+// #define N_EDGES_MAX 20000
 
-// #define N_NODE 10000
-// #define NODES_PER_CLUSTER 1000
-// #define N_CLUSTERS 10
+#define N_NODE 10000
+#define NODES_PER_CLUSTER 1000
+#define N_CLUSTERS 10
 // #define P_IN 0.05        // ~50 intra-cluster edges per node
 // #define P_OUT 0.0005     // ~5 inter-cluster edges per node
-// #define N_ITERATION 30
-// #define N_EDGES_MAX 500000  // 500K edges should be enough
+#define N_ITERATION 30
+#define N_EDGES_MAX 500000  // 500K edges should be enough
 
 
 // SBM probabilities
@@ -542,26 +542,24 @@ __global__ void calc_forman_ricci_curvature(
 __global__ void find_faces_in_graph(
         int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,
         int *d_edge_src, int *d_edge_dst,
-        int *d_faces,
+        char *d_faces,  // Changed from int* to char* (4x memory reduction)
         int *d_n_triangles,
         int n_undirected_edges
         ){    
     int idx = threadIdx.x + blockDim.x * blockIdx.x;
-    // int tid = threadIdx.x;
 
-    // int neighbor_idx;
     int j;
     int v1;
     int v2;
     int v;    
-    int face_idx_base;    
+    size_t face_idx_base;  // Changed to size_t for large indices
 
     while (idx < n_undirected_edges){
         // Inspecting idx-th edge
         v1 = d_edge_src[idx];
         v2 = d_edge_dst[idx];
 
-        face_idx_base = idx*N_NODE; 
+        face_idx_base = (size_t)idx * N_NODE; 
 
         // Pass 1: Mark all v1 neighbors as V1_ONLY
         for (j=0; j<d_v_adj_length[v1]; j++){
@@ -595,7 +593,7 @@ __global__ void find_faces_in_graph(
 __global__ void calc_augmented_forman_ricci_curvature(
         int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,
         int *d_edge_src, int *d_edge_dst,
-        int *d_faces,
+        char *d_faces,  // Changed from int* to char*
         int *d_n_triangles,
         float *d_edge_weight, float *d_edge_curvature,        
         int n_undirected_edges
@@ -605,7 +603,7 @@ __global__ void calc_augmented_forman_ricci_curvature(
     while (idx < n_undirected_edges){
         int v1 = d_edge_src[idx];
         int v2 = d_edge_dst[idx];
-        int face_idx_base = idx * N_NODE; 
+        size_t face_idx_base = (size_t)idx * N_NODE;  // Changed to size_t
 
         // Find edge indices
         int idx_v1_v2 = -1, idx_v2_v1 = -1;
@@ -622,61 +620,45 @@ __global__ void calc_augmented_forman_ricci_curvature(
             }
         }
 
-        float w_e = d_edge_weight[idx_v1_v2];        
-        float triangle_contrib = 0.0f;
+        float w_e = d_edge_weight[idx_v1_v2];
         
-        // Iterate over v1's neighbors to find triangles
+        // Count triangles and parallel neighbors for unweighted formula
+        // F(e) = #triangles + 2 - #parallel_edges
+        // Edges within communities have MORE triangles -> positive curvature
+        // Bridge edges have FEWER triangles -> negative curvature
+        
+        int n_triangles = 0;      // |face| - common neighbors forming triangles
+        int n_parallel = 0;       // |prl_nbr| - non-shared neighbors
+        
+        // Count v1's neighbors
         for (int j = 0; j < d_v_adj_length[v1]; j++){
             int n = d_v_adj_list[d_v_adj_begin[v1] + j];
             if (n == v2) continue;
             
-            // Check if n is also a neighbor of v2 (forms triangle)
             if (d_faces[face_idx_base + n] == FACES_BOTH) {
-                // Found a triangle: v1-v2-n
-                float w1 = d_edge_weight[d_v_adj_begin[v1] + j];  // edge v1-n
-                
-                // Find weight of edge v2-n
-                float w2 = 1.0f;
-                for (int k = 0; k < d_v_adj_length[v2]; k++){
-                    if (d_v_adj_list[d_v_adj_begin[v2] + k] == n){
-                        w2 = d_edge_weight[d_v_adj_begin[v2] + k];
-                        break;
-                    }
-                }
-                
-                // Heron's formula
-                float s = (w_e + w1 + w2) / 2.0f;
-                float area_sq = s * (s - w_e) * (s - w1) * (s - w2);
-                float w_tri = (area_sq > 0.0f) ? sqrtf(area_sq) : 0.0001f;
-                
-                triangle_contrib += w_e / w_tri;
+                // This neighbor forms a triangle
+                n_triangles++;
+            } else if (d_faces[face_idx_base + n] == FACES_V1_ONLY) {
+                // V1-only neighbor (parallel edge)
+                n_parallel++;
             }
         }
         
-        // Vertex contribution
-        float sum_ve = 2.0f / w_e;
-        
-        // Parallel edge contribution (non-triangle neighbors)
-        float sum_veeh = 0.0f;
-        
-        for (int j = 0; j < d_v_adj_length[v1]; j++){
-            int v = d_v_adj_list[d_v_adj_begin[v1] + j];
-            if (d_faces[face_idx_base + v] == FACES_V1_ONLY){
-                float w_ep = d_edge_weight[d_v_adj_begin[v1] + j];
-                sum_veeh += 1.0f / sqrtf(w_e * w_ep);
-            }            
-        }
-
+        // Count v2-only neighbors (parallel edges)
         for (int j = 0; j < d_v_adj_length[v2]; j++){
-            int v = d_v_adj_list[d_v_adj_begin[v2] + j];
-            if (d_faces[face_idx_base + v] == FACES_V2_ONLY){
-                float w_ep = d_edge_weight[d_v_adj_begin[v2] + j];
-                sum_veeh += 1.0f / sqrtf(w_e * w_ep);
-            }            
+            int n = d_v_adj_list[d_v_adj_begin[v2] + j];
+            if (n == v1) continue;
+            
+            if (d_faces[face_idx_base + n] == FACES_V2_ONLY) {
+                n_parallel++;
+            }
         }
-
-        // Final curvature
-        float curvature = w_e * (triangle_contrib + sum_ve - sum_veeh);
+        
+        // Forman-Ricci curvature (unweighted/simple version)
+        // F(e) = #faces + 2 - #parallel_edges
+        // Positive for edges within dense clusters (many triangles)
+        // Negative for bridge edges (few triangles, many parallel edges)
+        float curvature = (float)(n_triangles + 2 - n_parallel);
         
         d_edge_curvature[idx_v1_v2] = curvature;
         d_edge_curvature[idx_v2_v1] = curvature;
@@ -1278,20 +1260,14 @@ int main(){
     cudaCheckErrors("cudaMalloc for d_partial_sum failed");
 
     // Precompute faces, v1_nbr - face and v2_nbr - face for each edge
-    // Note:  O(|E|x|V|) storage.
-    int *d_faces; // 1: face, 2: v1_nbr, 3: v2_nbr
-    // cudaMalloc(&d_faces, n_undirected_edges*N_NODE*sizeof(int));
-    // cudaCheckErrors("cudaMalloc for d_faces failed");
-    cudaError_t err = cudaMalloc(&d_faces, (size_t)n_undirected_edges * N_NODE * sizeof(int));
-    if (err != cudaSuccess) {
-        printf("Failed to allocate d_faces: %s\n", cudaGetErrorString(err));
-        printf("Requested size: %zu bytes\n", (size_t)n_undirected_edges * N_NODE * sizeof(int));
-        exit(1);
-    }
-    else {
-        printf("Allocate d_faces successfully.\n");
-    }
-    cudaMemset(d_faces, 0, n_undirected_edges * N_NODE * sizeof(int));
+    // Using char instead of int: 4x memory reduction (5GB instead of 20GB)
+    // Values: 0=unused, 1=FACES_BOTH, 2=FACES_V1_ONLY, 3=FACES_V2_ONLY
+    char *d_faces;
+    size_t faces_size = (size_t)n_undirected_edges * N_NODE * sizeof(char);
+    printf("Allocating d_faces: %zu bytes (%.2f GB)\n", faces_size, faces_size / 1e9);
+    cudaMalloc(&d_faces, faces_size);
+    cudaCheckErrors("cudaMalloc for d_faces failed");
+    cudaMemset(d_faces, 0, faces_size);
     cudaCheckErrors("cudaMemset for d_faces to zero failed");
 
     int *d_n_triangles;
