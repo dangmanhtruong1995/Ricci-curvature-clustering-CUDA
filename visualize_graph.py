@@ -49,13 +49,13 @@ def visualize_graph(n, edges, clusters, output_file=None):
     unique_clusters = sorted(set(clusters))
     num_clusters = len(unique_clusters)
     
-    # Create colormap
-    if num_clusters <= 10:
-        cmap = cm.get_cmap('tab10')
-    elif num_clusters <= 20:
-        cmap = cm.get_cmap('tab20')
+    # Create colormap (using Set1/Set3 to avoid gray which matches edge color)
+    if num_clusters <= 9:
+        cmap = cm.get_cmap('Set1')
+    elif num_clusters <= 12:
+        cmap = cm.get_cmap('Set3')
     else:
-        cmap = cm.get_cmap('viridis')
+        cmap = cm.get_cmap('turbo')
     
     # Map cluster IDs to colors
     cluster_to_idx = {c: i for i, c in enumerate(unique_clusters)}

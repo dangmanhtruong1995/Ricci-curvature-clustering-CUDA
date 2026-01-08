@@ -47,15 +47,22 @@
 // #define N_ITERATION 30
 // #define N_EDGES_MAX 20000
 
+// #define N_NODE 10000
+// #define NODES_PER_CLUSTER 1000
+// #define N_CLUSTERS 10
+// #define P_IN 0.02         // ~20 intra-cluster edges per node
+// #define P_OUT 0.00002     // ~0.2 inter-cluster edges per node (10x lower)
+// #define N_ITERATION 120
+// #define N_EDGES_MAX 200000  // Should be enough for ~110K edges
+
+// LARGE SCALE (fixed parameters)
 #define N_NODE 10000
 #define NODES_PER_CLUSTER 1000
 #define N_CLUSTERS 10
-#define P_IN 0.02         // ~20 intra-cluster edges per node
-// #define P_OUT 0.0002      // ~2 inter-cluster edges per node (ratio 100:1)
-#define P_OUT 0.00002     // ~0.2 inter-cluster edges per node (10x lower)
-#define N_ITERATION 100
-#define N_EDGES_MAX 200000  // Should be enough for ~110K edges
-
+#define P_IN 0.05            // ~50 intra-cluster edges per node, good for triangles
+#define P_OUT 0.0005         // ~4.5 inter-cluster edges per node (ratio 100:1)
+#define N_ITERATION 80
+#define N_EDGES_MAX 300000
 
 // SBM probabilities
 // #define P_IN 0.4    // Probability of edge within same cluster
