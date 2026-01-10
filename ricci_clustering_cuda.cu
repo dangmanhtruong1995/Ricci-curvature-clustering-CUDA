@@ -10,65 +10,70 @@
 #include <assert.h>
 #include <queue>
 
+#include <algorithm>
+#include <vector>
+
+
 #include <thrust/sort.h>
 #include <thrust/device_ptr.h>
 #include <thrust/scan.h>
 #include <thrust/fill.h>
 
-// #define N_NODE 1000000
-// #define MAX_RAND_OUT_DEGREE 200
-
 // #define N_NODE 1000
-// #define NODES_PER_CLUSTER 100
-// #define N_CLUSTERS (N_NODE / NODES_PER_CLUSTER)
-// #define N_EDGES_MAX 10000
-// // #define N_EDGES_MAX 25000
-// // #define N_EDGES_MAX 50000
-// // #define N_EDGES_MAX 100000
-// // #define N_EDGES_MAX 500000  // Maximum edges to allocate
-// // #define STEP_SIZE 0.0001
+// #define NODES_PER_CLUSTER 500
+// #define N_CLUSTERS 2
+// #define P_IN 0.15
+// #define P_OUT 0.01
 
-// // #define STEP_SIZE 0.1f
-// #define STEP_SIZE 0.1f
+// #define N_NODE 5000
+// #define NODES_PER_CLUSTER 2500
+// #define N_CLUSTERS 2
+// #define P_IN 0.4
+// #define P_OUT 0.01
 
-// #define N_EDGES_TARGET 3000 // Target number of unique undirected edges
-// // #define N_ITERATION 10 // Number of iterations in calculating Ricci curvature
-// #define N_ITERATION 10
-// // #define N_ITERATION 100
-// // #define N_ITERATION 1 // For debugging purpose
-// // #define N_ITERATION 10        // More iterations
-// // #define N_ITERATION 12 
+#define N_NODE 5000
+#define NODES_PER_CLUSTER 1000
+#define N_CLUSTERS 5
+#define P_IN 0.5
+#define P_OUT 0.01
 
-#define N_NODE 500
-#define NODES_PER_CLUSTER 50
-#define N_CLUSTERS 10
-#define P_IN 0.4
-#define P_OUT 0.001
-#define N_ITERATION 30
-#define N_EDGES_MAX 20000
+// #define N_NODE 50000
+// #define NODES_PER_CLUSTER 25000
+// #define N_CLUSTERS 2
+// #define P_IN 0.5
+// #define P_OUT 0.01
 
-// #define N_NODE 10000
-// #define NODES_PER_CLUSTER 1000
-// #define N_CLUSTERS 10
-// #define P_IN 0.05        // ~50 intra-cluster edges per node
-// #define P_OUT 0.0005     // ~5 inter-cluster edges per node
-// #define N_ITERATION 30
-// #define N_EDGES_MAX 500000  // 500K edges should be enough
+// 1. Calculate nodes per cluster (n)
+#define N_PER_C ((double)N_NODE / N_CLUSTERS)
 
+// 2. Expected internal edges: K * [n(n-1)/2] * P_in
+#define EXPECTED_INTERNAL (N_CLUSTERS * (N_PER_C * (N_PER_C - 1.0) / 2.0) * P_IN)
 
-// SBM probabilities
-// #define P_IN 0.4    // Probability of edge within same cluster
-// #define P_OUT 0.001  // Probability of edge between different clusters
+// 3. Expected external edges: [K(K-1)/2] * n^2 * P_out
+#define EXPECTED_EXTERNAL ((N_CLUSTERS * (N_CLUSTERS - 1.0) / 2.0) * (N_PER_C * N_PER_C) * P_OUT)
 
-// For faces calculation (1: face, 2: v1_nbr, 3: v2_nbr)
-#define FACES_BOTH 1
-#define FACES_V1_ONLY 2
-#define FACES_V2_ONLY 3
+// 4. Final Max: (Internal + External) * 1.2 Safety Margin
+#define N_EDGES_MAX ((int)((EXPECTED_INTERNAL + EXPECTED_EXTERNAL) * 1.2))
 
+// #define N_EDGES_MAX 1100000
+
+#define N_ITERATION 10
 
 #define BLOCK_SIZE 256 // CUDA maximum is 1024
 #define VERY_LARGE_NUMBER 99999
 #define VWARP_SIZE 16 // Size of virtual warp
+
+// Paper parameters (Section 6.2.1)
+#define STEP_SCALE 1.1f      // νt = 1 / (1.1 × max|κ|)
+#define QUANTILE_Q 0.999f    // q = 0.999 for cutoff
+#define DELTA_STEP 0.25f     // δ = 0.25 for uniform spacing
+// #define DROP_THRESHOLD 0.1f  // d = 0.1 (skip if improvement < 10%)
+// #define MIN_MODULARITY 0.0f  // ε for minimum acceptable modularity
+
+#define MIN_WEIGHT 1e-6
+#define MAX_CURVATURE 1000.0
+#define MIN_AREA 1e-12
+#define MAX_TRIANGLE_CONTRIB 100.0
 
 #define cudaCheckErrors(msg) \
     do { \
@@ -90,7 +95,7 @@ int get_cluster(int node_idx) {
     return node_idx / NODES_PER_CLUSTER;
 }
 
-float get_edge_probability(int node_1, int node_2) {
+double get_edge_probability(int node_1, int node_2) {
     int cluster_1 = get_cluster(node_1);
     int cluster_2 = get_cluster(node_2);
     
@@ -101,7 +106,7 @@ float get_edge_probability(int node_1, int node_2) {
     }
 }
 
-__global__ void init_one_on_device(float* arr, int n) {
+__global__ void init_one_on_device(double* arr, int n) {
     for (int idx = blockIdx.x * blockDim.x + threadIdx.x; 
          idx < n; 
          idx += blockDim.x * gridDim.x) {
@@ -145,7 +150,7 @@ unsigned int next_power_of_2(unsigned int n) {
     return n + 1;
 }
 
-__global__ void copy_with_pad(float *src, float *dst, unsigned int arr_size, unsigned int next_pow){
+__global__ void copy_with_pad(double *src, double *dst, unsigned int arr_size, unsigned int next_pow){
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     while (idx < next_pow){
@@ -160,7 +165,7 @@ __global__ void copy_with_pad(float *src, float *dst, unsigned int arr_size, uns
     }
 }
 
-__global__ void copy_back_from_padded_array(float *src, float *dst, unsigned int arr_size){
+__global__ void copy_back_from_padded_array(double *src, double *dst, unsigned int arr_size){
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     while (idx < arr_size){
         dst[idx] = src[idx];
@@ -172,7 +177,7 @@ __global__ void copy_back_from_padded_array(float *src, float *dst, unsigned int
 // =========================================================================
 // Sorting on GPU
 // =========================================================================
-__global__ void bitonicSortGPU(float* arr, int j, int k)
+__global__ void bitonicSortGPU(double* arr, int j, int k)
 {
     unsigned int i, ij;
 
@@ -186,7 +191,7 @@ __global__ void bitonicSortGPU(float* arr, int j, int k)
         {
             if (arr[i] > arr[ij])
             {
-                float temp = arr[i];
+                double temp = arr[i];
                 arr[i] = arr[ij];
                 arr[ij] = temp;
             }
@@ -195,7 +200,7 @@ __global__ void bitonicSortGPU(float* arr, int j, int k)
         {
             if (arr[i] < arr[ij])
             {
-                float temp = arr[i];
+                double temp = arr[i];
                 arr[i] = arr[ij];
                 arr[ij] = temp;
             }
@@ -272,7 +277,7 @@ __global__ void prefix_sum(const int *A, int *sums, int *block_sums, size_t ds){
 
 void prefix_sum_partial_blocks(int *block_sums, int n_block){
     int i;
-    // float prefix_sum=0;
+    // double prefix_sum=0;
     for (i = 0; i < n_block; i++){        
         if (i > 0){
             block_sums[i] += block_sums[i-1];
@@ -333,8 +338,8 @@ void create_sbm_graph(
         int **node_cluster  // Output: cluster assignment for each node
     ) {
     int idx_1, idx_2, idx;
-    float random_number;
-    float edge_prob;
+    double random_number;
+    double edge_prob;
     int n_total_edge = 0;
 
     // Allocate memory
@@ -361,7 +366,7 @@ void create_sbm_graph(
             // Get edge probability based on cluster membership
             edge_prob = get_edge_probability(idx_1, idx_2);
             
-            random_number = (float)rand() / (float)(RAND_MAX);
+            random_number = (double)rand() / (double)(RAND_MAX);
             
             if (random_number <= edge_prob) {
                 (*edge_src)[*n_undirected_edges] = idx_1;
@@ -373,11 +378,11 @@ void create_sbm_graph(
                 (*n_undirected_edges)++;
             }
             
-            if (*n_undirected_edges >= N_EDGES_MAX) {
+            if ((*n_undirected_edges) >= N_EDGES_MAX) {
                 break;
             }
         }
-        if (*n_undirected_edges >= N_EDGES_MAX) {
+        if ((*n_undirected_edges) >= N_EDGES_MAX) {
             break;
         }
     }
@@ -465,149 +470,223 @@ int verify_graph(int *edge_src, int *edge_dst, int n_undirected_edges,
 // =========================================================================
 // Forman-Ricci curvature calculation on GPU
 // =========================================================================
-__global__ void calc_forman_ricci_curvature(
-        int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,
-        int *d_edge_src, int *d_edge_dst,
-        float *d_edge_weight, float*d_edge_curvature,
-        int n_undirected_edges
-        ){    
-    int idx = threadIdx.x + blockDim.x * blockIdx.x;
-    // int tid = threadIdx.x;
+// __global__ void calc_forman_ricci_curvature(
+//         int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,
+//         int *d_edge_src, int *d_edge_dst,
+//         double *d_edge_weight, double*d_edge_curvature,
+//         int n_undirected_edges
+//         ){    
+//     int idx = threadIdx.x + blockDim.x * blockIdx.x;
+//     // int tid = threadIdx.x;
 
-    // int neighbor_idx;
-    int j;
-    int v1;
-    int v2;
-    int v;
-    int idx_v1_v2_adj_list;
-    int idx_v2_v1_adj_list;
-    float w_e, w_v1, w_v2, ev1_sum, ev2_sum;
+//     // int neighbor_idx;
+//     int j;
+//     int v1;
+//     int v2;
+//     int v;
+//     int idx_v1_v2_adj_list;
+//     int idx_v2_v1_adj_list;
+//     double w_e, w_v1, w_v2, ev1_sum, ev2_sum;
 
-    while (idx < n_undirected_edges){
-        // Inspecting idx-th edge
-        v1 = d_edge_src[idx];
-        v2 = d_edge_dst[idx];
+//     while (idx < n_undirected_edges){
+//         // Inspecting idx-th edge
+//         v1 = d_edge_src[idx];
+//         v2 = d_edge_dst[idx];
 
-        // Find edge (v1 -> v2) in v1's adjacency list
-        for (j=0; j<d_v_adj_length[v1]; j++){
-            v = d_v_adj_list[d_v_adj_begin[v1] + j];
-            if (v == v2){
-                // continue;
-                idx_v1_v2_adj_list = d_v_adj_begin[v1] + j;
-                break;
-            }
-        }
+//         // Find edge (v1 -> v2) in v1's adjacency list
+//         for (j=0; j<d_v_adj_length[v1]; j++){
+//             v = d_v_adj_list[d_v_adj_begin[v1] + j];
+//             if (v == v2){
+//                 // continue;
+//                 idx_v1_v2_adj_list = d_v_adj_begin[v1] + j;
+//                 break;
+//             }
+//         }
 
-        // Find edge (v2 -> v1) in v2's adjacency list
-        idx_v2_v1_adj_list = -1;
-        for (j = 0; j < d_v_adj_length[v2]; j++) {
-            if (d_v_adj_list[d_v_adj_begin[v2] + j] == v1) {
-                idx_v2_v1_adj_list = d_v_adj_begin[v2] + j;
-                break;
-            }
-        }
+//         // Find edge (v2 -> v1) in v2's adjacency list
+//         idx_v2_v1_adj_list = -1;
+//         for (j = 0; j < d_v_adj_length[v2]; j++) {
+//             if (d_v_adj_list[d_v_adj_begin[v2] + j] == v1) {
+//                 idx_v2_v1_adj_list = d_v_adj_begin[v2] + j;
+//                 break;
+//             }
+//         }
 
-        w_e = d_edge_weight[idx_v1_v2_adj_list];
+//         w_e = d_edge_weight[idx_v1_v2_adj_list];
 
-        w_v1 = 1.0;
-        w_v2 = 1.0;
-        ev1_sum = 0.0;
-        ev2_sum = 0.0;
+//         w_v1 = 1.0;
+//         w_v2 = 1.0;
+//         ev1_sum = 0.0;
+//         ev2_sum = 0.0;
 
-        for (j=0; j<d_v_adj_length[v1]; j++){
-            v = d_v_adj_list[d_v_adj_begin[v1] + j];
-            if (v == v2){
-                continue;
-            }
-            ev1_sum += (w_v1 / sqrtf(w_e*d_edge_weight[d_v_adj_begin[v1] + j]));
-        }
+//         for (j=0; j<d_v_adj_length[v1]; j++){
+//             v = d_v_adj_list[d_v_adj_begin[v1] + j];
+//             if (v == v2){
+//                 continue;
+//             }
+//             ev1_sum += (w_v1 / sqrt(w_e*d_edge_weight[d_v_adj_begin[v1] + j]));
+//         }
 
-        for (j=0; j<d_v_adj_length[v2]; j++){
-            v = d_v_adj_list[d_v_adj_begin[v2] + j];
-            if (v == v1){
-                continue;
-            }
-            ev2_sum += (w_v2 / sqrtf(w_e*d_edge_weight[d_v_adj_begin[v2] + j]));
-        }
+//         for (j=0; j<d_v_adj_length[v2]; j++){
+//             v = d_v_adj_list[d_v_adj_begin[v2] + j];
+//             if (v == v1){
+//                 continue;
+//             }
+//             ev2_sum += (w_v2 / sqrt(w_e*d_edge_weight[d_v_adj_begin[v2] + j]));
+//         }
 
-        d_edge_curvature[idx_v1_v2_adj_list] = w_e * (w_v1 / w_e + w_v2 / w_e - (ev1_sum + ev2_sum));
-        d_edge_curvature[idx_v2_v1_adj_list] = d_edge_curvature[idx_v1_v2_adj_list];
+//         d_edge_curvature[idx_v1_v2_adj_list] = w_e * (w_v1 / w_e + w_v2 / w_e - (ev1_sum + ev2_sum));
+//         d_edge_curvature[idx_v2_v1_adj_list] = d_edge_curvature[idx_v1_v2_adj_list];
         
-        idx += gridDim.x*blockDim.x;
-    }
-}
+//         idx += gridDim.x*blockDim.x;
+//     }
+// }
 
 
-// For faces calculation (1: face, 2: v1_nbr, 3: v2_nbr)
-__global__ void find_faces_in_graph(
-        int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,
-        int *d_edge_src, int *d_edge_dst,
-        int *d_faces,
-        int *d_n_triangles,
-        int n_undirected_edges
-        ){    
-    int idx = threadIdx.x + blockDim.x * blockIdx.x;
-    // int tid = threadIdx.x;
+// __global__ void calc_augmented_forman_ricci_curvature(
+//         int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,
+//         int *d_edge_src, int *d_edge_dst,
+//         // int *d_faces,
+//         // int *d_n_triangles,
+//         double *d_edge_weight, double *d_edge_curvature,        
+//         int n_undirected_edges
+//         ){    
+//     int idx = threadIdx.x + blockDim.x * blockIdx.x;
 
-    // int neighbor_idx;
-    int j;
-    int v1;
-    int v2;
-    int v;    
-    int face_idx_base;    
+//     while (idx < n_undirected_edges){
+//         int v1 = d_edge_src[idx];
+//         int v2 = d_edge_dst[idx];
+//         int is_triangle;
 
-    while (idx < n_undirected_edges){
-        // Inspecting idx-th edge
-        v1 = d_edge_src[idx];
-        v2 = d_edge_dst[idx];
+//         // Find edge indices
+//         int idx_v1_v2 = -1, idx_v2_v1 = -1;
+//         for (int j = 0; j < d_v_adj_length[v1]; j++){
+//             if (d_v_adj_list[d_v_adj_begin[v1] + j] == v2){
+//                 idx_v1_v2 = d_v_adj_begin[v1] + j;
+//                 break;
+//             }
+//         }
+//         for (int j = 0; j < d_v_adj_length[v2]; j++){
+//             if (d_v_adj_list[d_v_adj_begin[v2] + j] == v1){
+//                 idx_v2_v1 = d_v_adj_begin[v2] + j;
+//                 break;
+//             }
+//         }
 
-        face_idx_base = idx*N_NODE; 
+//         double w_e = d_edge_weight[idx_v1_v2];        
+//         double triangle_contrib = 0.0f;
+        
+//         // Iterate over v1's neighbors to find triangles
+//         for (int j = 0; j < d_v_adj_length[v1]; j++){
+//             int n = d_v_adj_list[d_v_adj_begin[v1] + j];
+//             if (n == v2) continue;
+            
+//             is_triangle = 0;
+//             // Check if n is also a neighbor of v2 (forms triangle)
+//             for (int j2 = 0; j2 < d_v_adj_length[v2]; j2++){
+//                 if (n == d_v_adj_list[d_v_adj_begin[v2] + j2]){
+//                     is_triangle = 1;
+//                     break;
+//                 }
+//             }
 
-        // Pass 1: Mark all v1 neighbors as V1_ONLY
-        for (j=0; j<d_v_adj_length[v1]; j++){
-            v = d_v_adj_list[d_v_adj_begin[v1] + j];
-            if (v == v2){
-                continue;                
-            }
-            if (d_faces[face_idx_base+v] == 0){
-                d_faces[face_idx_base+v] = FACES_V1_ONLY;
-            }             
-        }
+//             // if (d_faces[face_idx_base + n] == FACES_BOTH) {
+//             if (is_triangle == 1){
+//                 // Found a triangle: v1-v2-n
+//                 double w1 = d_edge_weight[d_v_adj_begin[v1] + j];  // edge v1-n
+                
+//                 // Find weight of edge v2-n
+//                 double w2 = 1.0f;
+//                 for (int k = 0; k < d_v_adj_length[v2]; k++){
+//                     if (d_v_adj_list[d_v_adj_begin[v2] + k] == n){
+//                         w2 = d_edge_weight[d_v_adj_begin[v2] + k];
+//                         break;
+//                     }
+//                 }
+                
+//                 // Heron's formula
+//                 double s = (w_e + w1 + w2) / 2.0f;
+//                 double area_sq = s * (s - w_e) * (s - w1) * (s - w2);
+//                 double w_tri = (area_sq > 0.0f) ? sqrt(area_sq) : 0.0001f;
+                
+//                 triangle_contrib += w_e / w_tri;
+//             }
+//         }
+        
+//         // Vertex contribution
+//         double sum_ve = 2.0f / w_e;
+        
+//         // Parallel edge contribution (non-triangle neighbors)
+//         double sum_veeh = 0.0f;
+        
+//         for (int j = 0; j < d_v_adj_length[v1]; j++){
+//             int v = d_v_adj_list[d_v_adj_begin[v1] + j];
+//             if (v == v2) continue;
 
-        // Pass 2: Check v2 neighbors
-        for (j = 0; j < d_v_adj_length[v2]; j++) {
-            v = d_v_adj_list[d_v_adj_begin[v2] + j];
-            if (v == v1){
-                continue;                
-            }
-            if (d_faces[face_idx_base+v] == 0){
-                d_faces[face_idx_base+v] = FACES_V2_ONLY;                
-            } else if (d_faces[face_idx_base+v] == FACES_V1_ONLY){
-                d_faces[face_idx_base+v] = FACES_BOTH;
-                d_n_triangles[idx]++;
-            }
-        }
-        idx += gridDim.x*blockDim.x;
-    }
+//             // Check if v is a neighbor of v1 BUT not a neighbor of v2
+//             is_triangle = 0;
+//             for (int j2 = 0; j2 < d_v_adj_length[v2]; j2++){
+//                 if (v == d_v_adj_list[d_v_adj_begin[v2] + j2]){
+//                     is_triangle = 1;
+//                     break;
+//                 }
+//             }
 
-}
+//             // if (d_faces[face_idx_base + v] == FACES_V1_ONLY){
+//             if (is_triangle==0){
+//                 double w_ep = d_edge_weight[d_v_adj_begin[v1] + j];
+//                 sum_veeh += 1.0f / sqrt(w_e * w_ep);
+//             }            
+//         }
+
+//         for (int j = 0; j < d_v_adj_length[v2]; j++){
+//             int v = d_v_adj_list[d_v_adj_begin[v2] + j];
+//             if (v == v1) continue;
+
+//             // Check if v is a neighbor of v2 BUT not a neighbor of v1
+//             is_triangle = 0;
+//             for (int j2 = 0; j2 < d_v_adj_length[v1]; j2++){
+//                 if (v == d_v_adj_list[d_v_adj_begin[v1] + j2]){
+//                     is_triangle = 1;
+//                     break;
+//                 }
+//             }
+
+//             // if (d_faces[face_idx_base + v] == FACES_V2_ONLY){
+//             if (is_triangle==0){
+//                 double w_ep = d_edge_weight[d_v_adj_begin[v2] + j];
+//                 sum_veeh += 1.0f / sqrt(w_e * w_ep);
+//             }            
+//         }
+
+//         // Final curvature
+//         double curvature = w_e * (triangle_contrib + sum_ve - sum_veeh);
+        
+//         d_edge_curvature[idx_v1_v2] = curvature;
+//         d_edge_curvature[idx_v2_v1] = curvature;
+        
+//         idx += gridDim.x * blockDim.x;
+//     }
+// }
+
 
 __global__ void calc_augmented_forman_ricci_curvature(
         int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,
         int *d_edge_src, int *d_edge_dst,
-        int *d_faces,
-        int *d_n_triangles,
-        float *d_edge_weight, float *d_edge_curvature,        
+        double *d_edge_weight, double *d_edge_curvature,        
         int n_undirected_edges
         ){    
     int idx = threadIdx.x + blockDim.x * blockIdx.x;
 
-    while (idx < n_undirected_edges){
-        int v1 = d_edge_src[idx];
-        int v2 = d_edge_dst[idx];
-        int face_idx_base = idx * N_NODE; 
+    int v1;
+    int v2;
+    // int is_triangle;
 
-        // Find edge indices
+    while (idx < n_undirected_edges){
+        v1 = d_edge_src[idx];
+        v2 = d_edge_dst[idx];        
+
+        // Find edge weight and indices for (v1,v2)
         int idx_v1_v2 = -1, idx_v2_v1 = -1;
         for (int j = 0; j < d_v_adj_length[v1]; j++){
             if (d_v_adj_list[d_v_adj_begin[v1] + j] == v2){
@@ -621,63 +700,80 @@ __global__ void calc_augmented_forman_ricci_curvature(
                 break;
             }
         }
-
-        float w_e = d_edge_weight[idx_v1_v2];        
-        float triangle_contrib = 0.0f;
+ 
+        double w_e = fmax(d_edge_weight[idx_v1_v2], MIN_WEIGHT);     
+        double triangle_contrib = 0.0f;        
+        double sum_ve = 2.0f / w_e; // Vertex contribution 
+        double sum_veeh = 0.0f; // Parallel edge contribution (non-triangle neighbors)
         
-        // Iterate over v1's neighbors to find triangles
-        for (int j = 0; j < d_v_adj_length[v1]; j++){
-            int n = d_v_adj_list[d_v_adj_begin[v1] + j];
-            if (n == v2) continue;
-            
-            // Check if n is also a neighbor of v2 (forms triangle)
-            if (d_faces[face_idx_base + n] == FACES_BOTH) {
-                // Found a triangle: v1-v2-n
-                float w1 = d_edge_weight[d_v_adj_begin[v1] + j];  // edge v1-n
-                
-                // Find weight of edge v2-n
-                float w2 = 1.0f;
-                for (int k = 0; k < d_v_adj_length[v2]; k++){
-                    if (d_v_adj_list[d_v_adj_begin[v2] + k] == n){
-                        w2 = d_edge_weight[d_v_adj_begin[v2] + k];
-                        break;
-                    }
-                }
-                
-                // Heron's formula
-                float s = (w_e + w1 + w2) / 2.0f;
-                float area_sq = s * (s - w_e) * (s - w1) * (s - w2);
-                float w_tri = (area_sq > 0.0f) ? sqrtf(area_sq) : 0.0001f;
-                
+        int start_v1 = d_v_adj_begin[v1];
+        int len_v1 = d_v_adj_length[v1];
+        int end_v1 = start_v1 + len_v1;
+        
+        int start_v2 = d_v_adj_begin[v2];
+        int len_v2 = d_v_adj_length[v2];
+        int end_v2 = start_v2 + len_v2;
+
+        int i1 = start_v1;
+        int i2 = start_v2;
+
+        while ((i1 < end_v1) && (i2 < end_v2)){
+            int n1 = d_v_adj_list[i1];
+            int n2 = d_v_adj_list[i2];
+
+            // Skip v2 in v1's list and v1 in v2's list
+            if (n1 == v2) { i1++; continue; }
+            if (n2 == v1) { i2++; continue; }
+            if (n1 == n2){
+                // Common neighbor - triangle contribution
+                double w1 = fmax(d_edge_weight[i1], MIN_WEIGHT);
+                double w2 = fmax(d_edge_weight[i2], MIN_WEIGHT);
+
+                double s = (w_e + w1 + w2) / 2.0;
+                double term1 = s - w_e;
+                double term2 = s - w1;
+                double term3 = s - w2;
+                double area_sq = fabs(s * term1 * term2 * term3);
+                double w_tri = sqrt(fmax(area_sq, MIN_AREA));
+                // triangle_contrib += fmin(w_e / w_tri, MAX_TRIANGLE_CONTRIB);
                 triangle_contrib += w_e / w_tri;
+                
+                i1++; i2++;
+            } else if (n1 < n2) {
+                // n1 only in v1's neighborhood - parallel edge
+                double w_ep = fmax(d_edge_weight[i1], MIN_WEIGHT);
+                sum_veeh += 1.0 / sqrt(w_e * w_ep);
+                i1++;
+            } else {
+                // n2 only in v2's neighborhood - parallel edge
+                double w_ep = fmax(d_edge_weight[i2], MIN_WEIGHT);
+                sum_veeh += 1.0 / sqrt(w_e * w_ep);
+                i2++;
             }
         }
-        
-        // Vertex contribution
-        float sum_ve = 2.0f / w_e;
-        
-        // Parallel edge contribution (non-triangle neighbors)
-        float sum_veeh = 0.0f;
-        
-        for (int j = 0; j < d_v_adj_length[v1]; j++){
-            int v = d_v_adj_list[d_v_adj_begin[v1] + j];
-            if (d_faces[face_idx_base + v] == FACES_V1_ONLY){
-                float w_ep = d_edge_weight[d_v_adj_begin[v1] + j];
-                sum_veeh += 1.0f / sqrtf(w_e * w_ep);
-            }            
-        }
 
-        for (int j = 0; j < d_v_adj_length[v2]; j++){
-            int v = d_v_adj_list[d_v_adj_begin[v2] + j];
-            if (d_faces[face_idx_base + v] == FACES_V2_ONLY){
-                float w_ep = d_edge_weight[d_v_adj_begin[v2] + j];
-                sum_veeh += 1.0f / sqrtf(w_e * w_ep);
-            }            
+        // Remaining in v1's list are all non-common
+        while (i1 < end_v1) {
+            if (d_v_adj_list[i1] != v2) {
+                double w_ep = fmax(d_edge_weight[i1], MIN_WEIGHT);
+                sum_veeh += 1.0 / sqrt(w_e * w_ep);
+            }
+            i1++;
+        }
+        
+        // Remaining in v2's list are all non-common
+        while (i2 < end_v2) {
+            if (d_v_adj_list[i2] != v1) {
+                double w_ep = fmax(d_edge_weight[i2], MIN_WEIGHT);
+                sum_veeh += 1.0 / sqrt(w_e * w_ep);
+            }
+            i2++;
         }
 
         // Final curvature
-        float curvature = w_e * (triangle_contrib + sum_ve - sum_veeh);
-        
+        double curvature = w_e * (triangle_contrib + sum_ve - sum_veeh);
+        curvature = fmin(MAX_CURVATURE, fmax(-MAX_CURVATURE, curvature));
+
         d_edge_curvature[idx_v1_v2] = curvature;
         d_edge_curvature[idx_v2_v1] = curvature;
         
@@ -685,11 +781,12 @@ __global__ void calc_augmented_forman_ricci_curvature(
     }
 }
 
+
 __global__ void update_weight(
         int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,
         int *d_edge_src, int *d_edge_dst,
-        float *d_edge_weight, float*d_edge_curvature,
-        float adaptive_size,
+        double *d_edge_weight, double*d_edge_curvature,
+        double adaptive_size,
         int n_undirected_edges
         ){    
     int idx = threadIdx.x + blockDim.x * blockIdx.x;
@@ -699,12 +796,15 @@ __global__ void update_weight(
     int v;
     int idx_v1_v2_adj_list;
     int idx_v2_v1_adj_list;
-    float w_new;
+    double w_new;
 
     while (idx < n_undirected_edges){
         // Inspecting idx-th edge
         v1 = d_edge_src[idx];
         v2 = d_edge_dst[idx];
+
+        idx_v1_v2_adj_list = -1;
+        idx_v2_v1_adj_list = -1;
 
         // Find edge (v1 -> v2) in v1's adjacency list
         for (j=0; j<d_v_adj_length[v1]; j++){
@@ -724,28 +824,36 @@ __global__ void update_weight(
                 break;
             }
         }        
-        w_new = (1-adaptive_size*d_edge_curvature[idx_v1_v2_adj_list])*d_edge_weight[idx_v1_v2_adj_list];        
-        
-        // Clamp to prevent negative weights
-        if (w_new < 0.0001f) w_new = 0.0001f;
 
-        d_edge_weight[idx_v1_v2_adj_list] = w_new;
-        d_edge_weight[idx_v2_v1_adj_list] = w_new;
+        if (idx_v1_v2_adj_list >= 0) {
+            w_new = (1-adaptive_size*d_edge_curvature[idx_v1_v2_adj_list])*d_edge_weight[idx_v1_v2_adj_list];        
+            
+            // Clamp to prevent negative weights
+            // if (w_new < 0.0001f) w_new = 0.0001f;
+            w_new = fmax(w_new, MIN_WEIGHT);
+
+            d_edge_weight[idx_v1_v2_adj_list] = w_new;
+            d_edge_weight[idx_v2_v1_adj_list] = w_new;
+
+            if (idx_v2_v1_adj_list >= 0) {
+                d_edge_weight[idx_v2_v1_adj_list] = w_new;
+            }
+        }
         
         idx += gridDim.x*blockDim.x;
     }        
 }
 
 __global__ void array_sum_blockwise(
-        float *arr,
+        double *arr,
         int size,
-        float *d_partial_sum // Summation for all elements within the block only
+        double *d_partial_sum // Summation for all elements within the block only
 ){
-    __shared__ float cache[BLOCK_SIZE];
+    __shared__ double cache[BLOCK_SIZE];
     int idx = threadIdx.x + blockDim.x * blockIdx.x;
     int cacheIndex = threadIdx.x;
 
-    float temp = 0;
+    double temp = 0;
 	
 	while (idx < size) {
 		temp += arr[idx];
@@ -774,40 +882,37 @@ __global__ void array_sum_blockwise(
 }
 
 __global__ void normalize_weights(
-        float *d_edge_weight,
-        float total_weight,
-        int n_undirected_edges, // Number of UNDIRECTED edges
+        double *d_edge_weight,
+        double total_weight,
+        int n_undirected_edges,
         int n_total_edge
 ) {
     int idx = threadIdx.x + blockDim.x * blockIdx.x;
     
-    // Scale factor to preserve average weight
-    // total_weight is sum of both directions, so divide by 2 for undirected sum
-    float scale = (float)n_undirected_edges / (total_weight / 2.0f);
+    double scale = (double)n_undirected_edges / (total_weight / 2.0f);
 
     while (idx < n_total_edge) {
-        // d_edge_weight[idx] = d_edge_weight[idx] / total_weight;
         d_edge_weight[idx] = d_edge_weight[idx] * scale;
         idx += gridDim.x * blockDim.x;
     }
 }
 
-__global__ void clamp_weights_after_norm(float *d_edge_weight, int n_total_edge) {
-    int idx = threadIdx.x + blockDim.x * blockIdx.x;
-    while (idx < n_total_edge) {
-        if (d_edge_weight[idx] < 1e-10) d_edge_weight[idx] = 1e-10;
-        idx += gridDim.x * blockDim.x;
-    }
-}
+// __global__ void clamp_weights_after_norm(double *d_edge_weight, int n_total_edge) {
+//     int idx = threadIdx.x + blockDim.x * blockIdx.x;
+//     while (idx < n_total_edge) {
+//         if (d_edge_weight[idx] < 1e-10) d_edge_weight[idx] = 1e-10;
+//         idx += gridDim.x * blockDim.x;
+//     }
+// }
 
 __global__ void bfs_loop_using_virtual_warp_for_cc_labeling(
         int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,         
         int *d_edge_src, int *d_edge_dst,
-        float *d_edge_weight,
+        double *d_edge_weight,
         int *d_dist_arr, int *d_still_running,
         int iteration_counter, int start_vertex,
         int *component_list, int component_idx,
-        float threshold
+        double threshold
     ){
     int idx = threadIdx.x + blockDim.x * blockIdx.x;
     // int tid = threadIdx.x;
@@ -818,7 +923,7 @@ __global__ void bfs_loop_using_virtual_warp_for_cc_labeling(
     int vertex;
     // int temp;
     int n1;
-    // float w;
+    // double w;
     // int neighbor_index;
 
     while (idx < N_NODE){
@@ -849,11 +954,11 @@ __global__ void bfs_loop_using_virtual_warp_for_cc_labeling(
 int bfs_loop_using_virtual_warp_for_cc_labeling_wrapper(
     int *d_v_adj_list, int *d_v_adj_begin, int *d_v_adj_length,         
     int *d_edge_src, int *d_edge_dst,
-    float *d_edge_weight,
+    double *d_edge_weight,
     int *h_component_list, int *d_component_list,
     int *d_dist_arr,
     int *d_still_running,
-    float threshold){
+    double threshold){
 
     int idx;
     int n_block;
@@ -951,7 +1056,7 @@ int bfs_loop_using_virtual_warp_for_cc_labeling_wrapper(
 void calc_forman_ricci_cpu(
     int *v_adj_list, int *v_adj_begin, int *v_adj_length,
     int *edge_src, int *edge_dst,
-    float *edge_weight, float *edge_curvature,
+    double *edge_weight, double *edge_curvature,
     int n_undirected_edges
 ) {
     for (int idx = 0; idx < n_undirected_edges; idx++) {
@@ -959,7 +1064,7 @@ void calc_forman_ricci_cpu(
         int v2 = edge_dst[idx];
 
         // Find edge weight w_e
-        float w_e = 1.0f;
+        double w_e = 1.0f;
         int idx_v1_v2 = -1;
         for (int j = 0; j < v_adj_length[v1]; j++) {
             if (v_adj_list[v_adj_begin[v1] + j] == v2) {
@@ -969,28 +1074,28 @@ void calc_forman_ricci_cpu(
             }
         }
 
-        float w_v1 = 1.0f;
-        float w_v2 = 1.0f;
+        double w_v1 = 1.0f;
+        double w_v2 = 1.0f;
 
         // Sum over neighbors of v1 (excluding v2)
-        float ev1_sum = 0.0f;
+        double ev1_sum = 0.0f;
         for (int j = 0; j < v_adj_length[v1]; j++) {
             int v = v_adj_list[v_adj_begin[v1] + j];
             if (v == v2) continue;
-            float w_e_prime = edge_weight[v_adj_begin[v1] + j];
-            ev1_sum += w_v1 / sqrtf(w_e * w_e_prime);
+            double w_e_prime = edge_weight[v_adj_begin[v1] + j];
+            ev1_sum += w_v1 / sqrt(w_e * w_e_prime);
         }
 
         // Sum over neighbors of v2 (excluding v1)
-        float ev2_sum = 0.0f;
+        double ev2_sum = 0.0f;
         for (int j = 0; j < v_adj_length[v2]; j++) {
             int v = v_adj_list[v_adj_begin[v2] + j];
             if (v == v1) continue;
-            float w_e_prime = edge_weight[v_adj_begin[v2] + j];
-            ev2_sum += w_v2 / sqrtf(w_e * w_e_prime);
+            double w_e_prime = edge_weight[v_adj_begin[v2] + j];
+            ev2_sum += w_v2 / sqrt(w_e * w_e_prime);
         }
 
-        float curvature = w_e * (w_v1 / w_e + w_v2 / w_e - (ev1_sum + ev2_sum));
+        double curvature = w_e * (w_v1 / w_e + w_v2 / w_e - (ev1_sum + ev2_sum));
         edge_curvature[idx_v1_v2] = curvature;
     }
 }
@@ -999,7 +1104,7 @@ void calc_forman_ricci_cpu(
 // Returns number of communities and fills component_id array
 int find_connected_components_cpu_reference(
     int *v_adj_list, int *v_adj_begin, int *v_adj_length,
-    float *edge_weight, float threshold,
+    double *edge_weight, double threshold,
     int *component_id,  // Output: component ID for each node
     int n_nodes
 ) {
@@ -1026,7 +1131,7 @@ int find_connected_components_cpu_reference(
             for (int j = 0; j < v_adj_length[node]; j++) {
                 int idx = v_adj_begin[node] + j;
                 int neighbor = v_adj_list[idx];
-                float w = edge_weight[idx];
+                double w = edge_weight[idx];
                 
                 // Only traverse edge if weight <= threshold (not a bridge)
                 // if (w <= threshold && component_id[neighbor] == -1) {
@@ -1048,13 +1153,13 @@ int find_connected_components_cpu_reference(
 
 // Calculate modularity for a given partition
 // Q = (1/2m) * Σ[A_ij - k_i*k_j/(2m)] * δ(c_i, c_j)
-float calculate_modularity_cpu_reference(
+double calculate_modularity_cpu_reference(
     int *v_adj_list, int *v_adj_begin, int *v_adj_length,
     int *component_id,
     int n_nodes, int n_edges  // n_edges = number of undirected edges
 ) {
     int m = n_edges;  // Total undirected edges
-    float modularity = 0.0f;
+    double modularity = 0.0f;
     
     // For each edge, check if both endpoints are in same community
     for (int u = 0; u < n_nodes; u++) {
@@ -1067,9 +1172,9 @@ float calculate_modularity_cpu_reference(
             // A_ij = 1 (edge exists)
             // δ(c_i, c_j) = 1 if same community
             if (component_id[u] == component_id[v]) {
-                modularity += 1.0f - (float)(k_u * k_v) / (2.0f * m);
+                modularity += 1.0f - (double)(k_u * k_v) / (2.0f * m);
             } else {
-                modularity += 0.0f - (float)(k_u * k_v) / (2.0f * m);
+                modularity += 0.0f - (double)(k_u * k_v) / (2.0f * m);
             }
         }
     }
@@ -1081,14 +1186,14 @@ float calculate_modularity_cpu_reference(
 // Find optimal threshold and communities using Ricci flow weights
 void find_communities_ricci_cpu_reference(
     int *v_adj_list, int *v_adj_begin, int *v_adj_length,
-    float *edge_weight,
+    double *edge_weight,
     int *edge_src, int *edge_dst,
     int n_nodes, int n_undirected_edges
 ) {
     int *component_id = (int*)malloc(n_nodes * sizeof(int));
     
     // Collect all unique edge weights to use as thresholds
-    float *thresholds = (float*)malloc(n_undirected_edges * sizeof(float));
+    double *thresholds = (double*)malloc(n_undirected_edges * sizeof(double));
     int n_thresholds = 0;
     
     for (int i = 0; i < n_undirected_edges; i++) {
@@ -1108,7 +1213,7 @@ void find_communities_ricci_cpu_reference(
     for (int i = 0; i < n_thresholds - 1; i++) {
         for (int j = i + 1; j < n_thresholds; j++) {
             if (thresholds[i] > thresholds[j]) {
-                float tmp = thresholds[i];
+                double tmp = thresholds[i];
                 thresholds[i] = thresholds[j];
                 thresholds[j] = tmp;
             }
@@ -1116,8 +1221,8 @@ void find_communities_ricci_cpu_reference(
     }
     
     // Try different thresholds and compute modularity
-    float best_modularity = -1.0f;
-    float best_threshold = 0.0f;
+    double best_modularity = -1.0f;
+    double best_threshold = 0.0f;
     int best_n_communities = 1;
     
     printf("\n=== Threshold Search (CPU Reference) ===\n");
@@ -1129,7 +1234,7 @@ void find_communities_ricci_cpu_reference(
     if (step < 1) step = 1;
     
     for (int i = 0; i < n_thresholds; i += step) {
-        float threshold = thresholds[i];
+        double threshold = thresholds[i];
         
         int n_communities = find_connected_components_cpu_reference(
             v_adj_list, v_adj_begin, v_adj_length,
@@ -1137,7 +1242,7 @@ void find_communities_ricci_cpu_reference(
             component_id, n_nodes
         );
         
-        float modularity = calculate_modularity_cpu_reference(
+        double modularity = calculate_modularity_cpu_reference(
             v_adj_list, v_adj_begin, v_adj_length,
             component_id, n_nodes, n_undirected_edges
         );
@@ -1187,22 +1292,149 @@ void find_communities_ricci_cpu_reference(
     free(thresholds);
 }
 
+int find_connected_components(
+    int *v_adj_list, int *v_adj_begin, int *v_adj_length,
+    double *edge_weight, double threshold,
+    int *component_id, int n_nodes
+) {
+    for (int i = 0; i < n_nodes; i++) {
+        component_id[i] = -1;
+    }
+    
+    int n_components = 0;
+    int *queue = (int*)malloc(n_nodes * sizeof(int));
+    
+    for (int start = 0; start < n_nodes; start++) {
+        if (component_id[start] != -1) continue;
+        
+        int queue_start = 0, queue_end = 0;
+        queue[queue_end++] = start;
+        component_id[start] = n_components;
+        
+        while (queue_start < queue_end) {
+            int node = queue[queue_start++];
+            
+            for (int j = 0; j < v_adj_length[node]; j++) {
+                int idx = v_adj_begin[node] + j;
+                int neighbor = v_adj_list[idx];
+                double w = edge_weight[idx];
+                
+                // Traverse edge only if weight < threshold (internal edge)
+                // High-weight edges are bridges that we cut
+                if (w < threshold && component_id[neighbor] == -1) {
+                    component_id[neighbor] = n_components;
+                    queue[queue_end++] = neighbor;
+                }
+            }
+        }
+        n_components++;
+    }
+    
+    free(queue);
+    return n_components;
+}
+
+double calculate_modularity(
+    int *v_adj_list, int *v_adj_begin, int *v_adj_length,
+    int *component_id, int n_nodes, int n_edges
+) {
+    if (n_edges == 0) return 0.0;
+
+    int m = n_edges;
+    double modularity = 0.0f;
+    
+    for (int u = 0; u < n_nodes; u++) {
+        int k_u = v_adj_length[u];
+        
+        for (int j = 0; j < v_adj_length[u]; j++) {
+            int v = v_adj_list[v_adj_begin[u] + j];
+            int k_v = v_adj_length[v];
+            
+            if (component_id[u] == component_id[v]) {
+                modularity += 1.0f - (double)(k_u * k_v) / (2.0f * m);
+            } else {
+                modularity += 0.0f - (double)(k_u * k_v) / (2.0f * m);
+            }
+        }
+    }
+    
+    modularity /= (2.0f * m);
+    return modularity;
+}
+
+double calculate_nmi(int *pred_labels, int *true_labels, int n_nodes, 
+                    int n_pred_clusters, int n_true_clusters) {
+    // Compute confusion matrix
+    int max_clusters = (n_pred_clusters > n_true_clusters) ? n_pred_clusters : n_true_clusters;
+    int *confusion = (int*)calloc(max_clusters * max_clusters, sizeof(int));
+    int *pred_counts = (int*)calloc(max_clusters, sizeof(int));
+    int *true_counts = (int*)calloc(max_clusters, sizeof(int));
+    
+    for (int i = 0; i < n_nodes; i++) {
+        int p = pred_labels[i];
+        int t = true_labels[i];
+        if (p >= 0 && p < max_clusters && t >= 0 && t < max_clusters) {
+            confusion[p * max_clusters + t]++;
+            pred_counts[p]++;
+            true_counts[t]++;
+        }
+    }
+    
+    // Compute mutual information
+    double mi = 0.0f;
+    for (int i = 0; i < n_pred_clusters; i++) {
+        for (int j = 0; j < n_true_clusters; j++) {
+            if (confusion[i * max_clusters + j] > 0 && 
+                pred_counts[i] > 0 && true_counts[j] > 0) {
+                double pij = (double)confusion[i * max_clusters + j] / n_nodes;
+                double pi = (double)pred_counts[i] / n_nodes;
+                double pj = (double)true_counts[j] / n_nodes;
+                mi += pij * log(pij / (pi * pj));
+            }
+        }
+    }
+    
+    // Compute entropies
+    double h_pred = 0.0f, h_true = 0.0f;
+    for (int i = 0; i < n_pred_clusters; i++) {
+        if (pred_counts[i] > 0) {
+            double p = (double)pred_counts[i] / n_nodes;
+            h_pred -= p * log(p);
+        }
+    }
+    for (int j = 0; j < n_true_clusters; j++) {
+        if (true_counts[j] > 0) {
+            double p = (double)true_counts[j] / n_nodes;
+            h_true -= p * log(p);
+        }
+    }
+    
+    free(confusion);
+    free(pred_counts);
+    free(true_counts);
+    
+    // NMI = 2 * MI / (H_pred + H_true)
+    double denom = h_pred + h_true;
+    if (denom < 1e-10f) return 0.0f;
+    return 2.0f * mi / denom;
+}
+
 
 int main(){
-    srand(time(NULL));
-    // srand(42);
+    // srand(time(NULL));
+    srand(42);
     int n_block;
     int *edge_src, *edge_dst;
     int idx, iter, i, j, k;
     // int idx_1, idx_2;    
-    // float random_number;
-    float edge_weight_sum;
+    // double random_number;
+    double edge_weight_sum;
 
     // Create random edges for an undirected graph
     // Then put it into adjacency list form (v_adj_list, v_adj_begin, v_adj_length)
     int *v_adj_length, *v_adj_begin, *v_adj_list;  
     int *v_adj_begin_2;
-    float *h_partial_sum, *d_partial_sum;
+    double *h_partial_sum, *d_partial_sum;
     int n_total_edge, n_undirected_edges;
     int *node_cluster;
 
@@ -1211,6 +1443,20 @@ int main(){
         &edge_src, &edge_dst, &v_adj_begin_2,
         &n_undirected_edges, &node_cluster);
     n_total_edge = 2*n_undirected_edges;
+
+    // Verify adjacency lists are sorted
+    int unsorted_count = 0;
+    for (int i = 0; i < N_NODE; i++) {
+        for (int j = 1; j < v_adj_length[i]; j++) {
+            if (v_adj_list[v_adj_begin[i] + j] < v_adj_list[v_adj_begin[i] + j - 1]) {
+                unsorted_count++;
+                break;
+            }
+        }
+    }
+    if (unsorted_count > 0) {
+        printf("WARNING: %d nodes have unsorted adjacency lists!\n", unsorted_count);
+    }
 
     // Print results to verify
     // printf("Generated %d undirected edges (%d directed entries)\n", n_undirected_edges, n_total_edge);
@@ -1233,13 +1479,13 @@ int main(){
              v_adj_list, v_adj_begin, v_adj_length);
 
     // Ricci curvature
-    float *d_edge_weight, *h_edge_weight;
-    float *d_edge_curvature, *h_edge_curvature;
+    double *d_edge_weight, *h_edge_weight;
+    double *d_edge_curvature, *h_edge_curvature;
     
-    cudaMalloc(&d_edge_weight, n_total_edge * sizeof(float));
-    cudaMalloc(&d_edge_curvature, n_total_edge * sizeof(float));
-    h_edge_weight = (float*)malloc(n_total_edge * sizeof(float));
-    h_edge_curvature = (float*)malloc(n_total_edge * sizeof(float));
+    cudaMalloc(&d_edge_weight, n_total_edge * sizeof(double));
+    cudaMalloc(&d_edge_curvature, n_total_edge * sizeof(double));
+    h_edge_weight = (double*)malloc(n_total_edge * sizeof(double));
+    h_edge_curvature = (double*)malloc(n_total_edge * sizeof(double));
 
     n_block = (n_total_edge+BLOCK_SIZE-1)/BLOCK_SIZE; 
     init_one_on_device<<<n_block, BLOCK_SIZE>>>(d_edge_weight, n_total_edge);
@@ -1273,64 +1519,10 @@ int main(){
     cudaCheckErrors("Copy from edge_dst to d_edge_dst failed.");
     
     n_block = (n_total_edge+BLOCK_SIZE-1)/BLOCK_SIZE;    
-    h_partial_sum = (float*)malloc( n_block*sizeof(float) );
-    cudaMalloc(&d_partial_sum, n_block * sizeof(float));
+    h_partial_sum = (double*)malloc( n_block*sizeof(double) );
+    cudaMalloc(&d_partial_sum, n_block * sizeof(double));
     cudaCheckErrors("cudaMalloc for d_partial_sum failed");
-
-    // Precompute faces, v1_nbr - face and v2_nbr - face for each edge
-    // Note:  O(|E|x|V|) storage.
-    int *d_faces; // 1: face, 2: v1_nbr, 3: v2_nbr
-    // cudaMalloc(&d_faces, n_undirected_edges*N_NODE*sizeof(int));
-    // cudaCheckErrors("cudaMalloc for d_faces failed");
-    cudaError_t err = cudaMalloc(&d_faces, (size_t)n_undirected_edges * N_NODE * sizeof(int));
-    if (err != cudaSuccess) {
-        printf("Failed to allocate d_faces: %s\n", cudaGetErrorString(err));
-        printf("Requested size: %zu bytes\n", (size_t)n_undirected_edges * N_NODE * sizeof(int));
-        exit(1);
-    }
-    else {
-        printf("Allocate d_faces successfully.\n");
-    }
-    cudaMemset(d_faces, 0, n_undirected_edges * N_NODE * sizeof(int));
-    cudaCheckErrors("cudaMemset for d_faces to zero failed");
-
-    int *d_n_triangles;
-    cudaMalloc(&d_n_triangles, n_undirected_edges*sizeof(int));
-    cudaCheckErrors("cudaMalloc for d_n_triangles failed");
-    cudaMemset(d_n_triangles, 0, n_undirected_edges* sizeof(int));
-    cudaCheckErrors("cudaMemset for d_n_triangles to zero failed"); 
-
-    n_block = (n_undirected_edges + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    find_faces_in_graph<<<n_block, BLOCK_SIZE>>>(
-        d_v_adj_list, d_v_adj_begin, d_v_adj_length,
-        d_edge_src, d_edge_dst,
-        d_faces,
-        d_n_triangles,
-        n_undirected_edges);
-    cudaDeviceSynchronize();
-    cudaCheckErrors("find_faces_in_graph failed");
-
-    // // Optional: Print triangle statistics
-    // int *h_n_triangles = (int*)malloc(n_undirected_edges * sizeof(int));
-    // cudaMemcpy(h_n_triangles, d_n_triangles, n_undirected_edges * sizeof(int), cudaMemcpyDeviceToHost);
-    
-    // int total_triangles = 0;
-    // int max_triangles = 0;
-    // int edges_with_triangles = 0;
-    // for (int i = 0; i < n_undirected_edges; i++) {
-    //     total_triangles += h_n_triangles[i];
-    //     if (h_n_triangles[i] > max_triangles) max_triangles = h_n_triangles[i];
-    //     if (h_n_triangles[i] > 0) edges_with_triangles++;
-    // }
-    // printf("Triangle statistics:\n");
-    // printf("  Total triangle-edge incidences: %d\n", total_triangles);
-    // printf("  Unique triangles (approx): %d\n", total_triangles / 3);  // Each triangle counted 3 times
-    // printf("  Edges with triangles: %d / %d (%.1f%%)\n", 
-    //        edges_with_triangles, n_undirected_edges, 
-    //        100.0 * edges_with_triangles / n_undirected_edges);
-    // printf("  Max triangles per edge: %d\n", max_triangles);
-    // free(h_n_triangles);
-
+   
     // Calculate Ricci curvature, update then normalize weights
     for (iter=0; iter<N_ITERATION; iter++){
         // n_block = (n_undirected_edges+BLOCK_SIZE-1)/BLOCK_SIZE; 
@@ -1346,52 +1538,26 @@ int main(){
         calc_augmented_forman_ricci_curvature<<<n_block, BLOCK_SIZE>>>(
             d_v_adj_list, d_v_adj_begin, d_v_adj_length,
             d_edge_src, d_edge_dst,
-            d_faces,
-            d_n_triangles,
             d_edge_weight, d_edge_curvature,
             n_undirected_edges);
         cudaDeviceSynchronize();
         cudaCheckErrors("calc_augmented_forman_ricci_curvature failed");
 
-        cudaMemcpy(h_edge_curvature, d_edge_curvature, n_total_edge*sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(h_edge_curvature, d_edge_curvature, n_total_edge*sizeof(double), cudaMemcpyDeviceToHost);
         cudaCheckErrors("Copy from d_edge_curvature to h_edge_curvature failed.");
         
         // After computing curvature, find max absolute value
-        float max_curv = 0.0f;
+        double max_curv = 0.0f;
         for (int i = 0; i < n_total_edge; i++) {
-            float abs_curv = fabsf(h_edge_curvature[i]);
+            double abs_curv = fabs(h_edge_curvature[i]);
             if (abs_curv > max_curv) max_curv = abs_curv;
         }
 
         // Adaptive step size (as in paper)
-        float adaptive_step = 1.0f / (1.1f * max_curv + 1e-10f);
-        if (adaptive_step > 1.0f) adaptive_step = 1.0f;  // Cap at 1.0
+        double adaptive_step = 1.0f / (STEP_SCALE * max_curv + 1e-10f);
+        adaptive_step = fmin(adaptive_step, 1.0);
 
         printf("Iter %d: max_curv=%.2f, step=%.6f\n", iter, max_curv, adaptive_step);
-
-        // DEBUG: Check weights AFTER update, BEFORE normalization
-        // if (iter == N_ITERATION - 1) {  // Only on last iteration
-        //     cudaMemcpy(h_edge_weight, d_edge_weight, n_total_edge * sizeof(float), cudaMemcpyDeviceToHost);
-            
-        //     float debug_min = 1e30, debug_max = -1e30, debug_sum = 0;
-        //     int zeros_count = 0;
-        //     int at_clamp_count = 0;
-            
-        //     for (int i = 0; i < n_total_edge; i++) {
-        //         if (h_edge_weight[i] < debug_min) debug_min = h_edge_weight[i];
-        //         if (h_edge_weight[i] > debug_max) debug_max = h_edge_weight[i];
-        //         debug_sum += h_edge_weight[i];
-        //         if (h_edge_weight[i] == 0.0) zeros_count++;
-        //         if (h_edge_weight[i] <= 1e-10) at_clamp_count++;
-        //     }
-            
-        //     printf("\n=== DEBUG: After update_weight, BEFORE normalization ===\n");
-        //     printf("Min weight: %.20e\n", debug_min);
-        //     printf("Max weight: %.20e\n", debug_max);
-        //     printf("Sum: %.20e\n", debug_sum);
-        //     printf("Zeros: %d / %d\n", zeros_count, n_total_edge);
-        //     printf("At/below clamp (1e-10): %d / %d\n", at_clamp_count, n_total_edge);
-        // }
 
         update_weight<<<n_block, BLOCK_SIZE>>>(
             d_v_adj_list, d_v_adj_begin, d_v_adj_length,
@@ -1411,7 +1577,7 @@ int main(){
         cudaCheckErrors("Kernel launch for array_sum_blockwise failed");
         cudaDeviceSynchronize();
 
-        cudaMemcpy(h_partial_sum, d_partial_sum, n_block*sizeof(float), cudaMemcpyDeviceToHost );
+        cudaMemcpy(h_partial_sum, d_partial_sum, n_block*sizeof(double), cudaMemcpyDeviceToHost );
         edge_weight_sum = 0.0;
         for (idx=0; idx<n_block; idx++) {
             edge_weight_sum += h_partial_sum[idx];
@@ -1422,113 +1588,27 @@ int main(){
             d_edge_weight, edge_weight_sum, n_undirected_edges, n_total_edge);
         cudaDeviceSynchronize();
 
-        clamp_weights_after_norm<<<n_block, BLOCK_SIZE>>>(d_edge_weight, n_total_edge);
-        cudaDeviceSynchronize();
+        // clamp_weights_after_norm<<<n_block, BLOCK_SIZE>>>(d_edge_weight, n_total_edge);
+        // cudaDeviceSynchronize();
 
-        // DEBUG: Check weights AFTER normalization
-        // if (iter == N_ITERATION - 1) {
-        //     cudaMemcpy(h_edge_weight, d_edge_weight, n_total_edge * sizeof(float), cudaMemcpyDeviceToHost);
-            
-        //     float debug_min = 1e30, debug_max = -1e30;
-        //     int zeros_count = 0;
-            
-        //     for (int i = 0; i < n_total_edge; i++) {
-        //         if (h_edge_weight[i] < debug_min) debug_min = h_edge_weight[i];
-        //         if (h_edge_weight[i] > debug_max) debug_max = h_edge_weight[i];
-        //         if (h_edge_weight[i] == 0.0) zeros_count++;
-        //     }
-            
-        //     printf("\n=== DEBUG: AFTER normalization ===\n");
-        //     printf("Min weight: %.20e\n", debug_min);
-        //     printf("Max weight: %.20e\n", debug_max);
-        //     printf("Normalization divisor was: %.20e\n", edge_weight_sum);
-        //     printf("Zeros: %d / %d\n", zeros_count, n_total_edge);
-        // }
-
-        printf("Iteration %d: sum_weights = %.4f\n", iter, edge_weight_sum);
-
-        // if (iter == 0) {
-        //     cudaMemcpy(h_edge_curvature, d_edge_curvature, n_total_edge * sizeof(float), cudaMemcpyDeviceToHost);
-            
-        //     float curv_min = 1e30f, curv_max = -1e30f;
-        //     float curv_sum = 0.0f;
-        //     int pos_count = 0, neg_count = 0;
-            
-        //     float intra_curv_sum = 0.0f, inter_curv_sum = 0.0f;
-        //     int intra_count = 0, inter_count = 0;
-            
-        //     for (int i = 0; i < n_undirected_edges; i++) {
-        //         int s = edge_src[i];
-        //         int d = edge_dst[i];
-                
-        //         // Find curvature (need to look up in adjacency)
-        //         float curv = 0.0f;
-        //         for (int j = 0; j < v_adj_length[s]; j++) {
-        //             if (v_adj_list[v_adj_begin[s] + j] == d) {
-        //                 curv = h_edge_curvature[v_adj_begin[s] + j];
-        //                 break;
-        //             }
-        //         }
-                
-        //         if (curv < curv_min) curv_min = curv;
-        //         if (curv > curv_max) curv_max = curv;
-        //         curv_sum += curv;
-        //         if (curv > 0) pos_count++; else neg_count++;
-                
-        //         if (node_cluster[s] == node_cluster[d]) {
-        //             intra_curv_sum += curv;
-        //             intra_count++;
-        //         } else {
-        //             inter_curv_sum += curv;
-        //             inter_count++;
-        //         }
-        //     }
-            
-        //     printf("\n=== Curvature Statistics (Iter 0) ===\n");
-        //     printf("Min curvature: %.4f\n", curv_min);
-        //     printf("Max curvature: %.4f\n", curv_max);
-        //     printf("Avg curvature: %.4f\n", curv_sum / n_undirected_edges);
-        //     printf("Positive: %d, Negative: %d\n", pos_count, neg_count);
-        //     printf("Intra-cluster avg curvature: %.4f\n", intra_curv_sum / intra_count);
-        //     printf("Inter-cluster avg curvature: %.4f\n", inter_curv_sum / inter_count);
-        //     printf("Expected: Intra > Inter (intra edges have more triangles)\n\n");
-        // }
+        printf("Iteration %d: sum_weights = %.4f\n", iter, edge_weight_sum);       
     }
 
     // Copy final weights back
-    cudaMemcpy(h_edge_weight, d_edge_weight, n_total_edge * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_edge_weight, d_edge_weight, n_total_edge * sizeof(double), cudaMemcpyDeviceToHost);
 
     // Analyze weight distribution
-    float min_w = 1e9, max_w = -1e9;
-    int min_idx = 0, max_idx = 0;
-
+    double min_w = 1e9f, max_w = -1e9f;
+    double intra_sum = 0.0f, inter_sum = 0.0f;
+    int intra_w_count = 0, inter_w_count = 0;
+    
+    std::vector<double> all_weights;
+    
     for (int i = 0; i < n_undirected_edges; i++) {
         int v1 = edge_src[i];
         int v2 = edge_dst[i];
         
-        int idx_adj = -1;
-        for (int j = 0; j < v_adj_length[v1]; j++) {
-            if (v_adj_list[v_adj_begin[v1] + j] == v2) {
-                idx_adj = v_adj_begin[v1] + j;
-                break;
-            }
-        }
-        
-        float w = h_edge_weight[idx_adj];
-        if (w < min_w) { min_w = w; min_idx = i; }
-        if (w > max_w) { max_w = w; max_idx = i; }
-    }
-
-    // Add this after computing weights, before sorting:
-    float intra_sum = 0, inter_sum = 0;
-    int intra_count = 0, inter_count = 0;
-
-    for (int i = 0; i < n_undirected_edges; i++) {
-        int v1 = edge_src[i];
-        int v2 = edge_dst[i];
-        
-        // Find weight
-        float w = 0;
+        double w = 0.0f;
         for (int j = 0; j < v_adj_length[v1]; j++) {
             if (v_adj_list[v_adj_begin[v1] + j] == v2) {
                 w = h_edge_weight[v_adj_begin[v1] + j];
@@ -1536,25 +1616,34 @@ int main(){
             }
         }
         
+        all_weights.push_back(w);
+        if (w < min_w) min_w = w;
+        if (w > max_w) max_w = w;
+        
         if (node_cluster[v1] == node_cluster[v2]) {
             intra_sum += w;
-            intra_count++;
+            intra_w_count++;
         } else {
             inter_sum += w;
-            inter_count++;
+            inter_w_count++;
         }
     }
 
-    printf("\n=== Intra vs Inter Cluster Weights ===\n");
-    printf("Intra-cluster: count=%d, avg_weight=%.8f\n", intra_count, intra_sum/intra_count);
-    printf("Inter-cluster: count=%d, avg_weight=%.8f\n", inter_count, inter_sum/inter_count);
-    printf("Ratio (intra/inter): %.4f\n", (intra_sum/intra_count)/(inter_sum/inter_count));
-    
+    printf("\n=== Weight Analysis ===\n");
+    printf("Min weight: %.6f\n", min_w);
+    printf("Max weight: %.6f\n", max_w);
+    printf("Ratio max/min: %.2f\n", max_w / min_w);
+    printf("Intra-cluster avg weight: %.6f\n", intra_sum / intra_w_count);
+    printf("Inter-cluster avg weight: %.6f\n", inter_sum / inter_w_count);
+    printf("Weight ratio (inter/intra): %.4f\n", 
+           (inter_sum / inter_w_count) / (intra_sum / intra_w_count));
+
+
     // Sort the weights in ascending order
     unsigned int next_pow = next_power_of_2(n_total_edge);
-    float *h_edge_weight_padded, *d_edge_weight_padded;
-    h_edge_weight_padded = (float*)malloc(next_pow * sizeof(float));
-    cudaMalloc((void**)&d_edge_weight_padded, next_pow * sizeof(float));
+    double *d_edge_weight_padded;
+    // h_edge_weight_padded = (double*)malloc(next_pow * sizeof(double));
+    cudaMalloc((void**)&d_edge_weight_padded, next_pow * sizeof(double));
 
     n_block = (next_pow + BLOCK_SIZE - 1) / BLOCK_SIZE;    
     copy_with_pad <<<n_block, BLOCK_SIZE>>>(d_edge_weight, d_edge_weight_padded, n_total_edge, next_pow);
@@ -1570,80 +1659,86 @@ int main(){
     }   
     
     // Copy sorted weights back to host
-    float *h_sorted_weights = (float*)malloc(n_total_edge * sizeof(float));
-    cudaMemcpy(h_sorted_weights, d_edge_weight_padded, n_total_edge * sizeof(float), cudaMemcpyDeviceToHost);
+    double *h_sorted_weights = (double*)malloc(n_total_edge * sizeof(double));
+    cudaMemcpy(h_sorted_weights, d_edge_weight_padded, n_total_edge * sizeof(double), cudaMemcpyDeviceToHost);
 
     // Print sorted weights
     printf("\n=== Sorted Weights (ascending) ===\n");
-    // printf("First 20 weights (smallest):\n");
-    // for (i = 0; i < n_total_edge; i++) {
-    //     printf("  [%d] %.8f\n", i, h_sorted_weights[i]);
-    // }
-    
-    printf("\n=== Weight Analysis After %d Iterations ===\n", N_ITERATION);
-    printf("Min weight: %.8f at edge (%d, %d)\n", 
-        min_w, edge_src[min_idx], edge_dst[min_idx]);
-    printf("Max weight: %.8f at edge (%d, %d)\n", 
-        max_w, edge_src[max_idx], edge_dst[max_idx]);
-    printf("Ratio max/min: %.4f\n", max_w / min_w);
+    printf("First 20 weights (smallest):\n");
+    for (i = 0; i < 20; i++) {
+        printf("  [%d] %.8f\n", i, h_sorted_weights[i]);
+    }
 
-    // Add this after graph generation to verify:
-    // int intra_count = 0, inter_count = 0;
-    intra_count = 0;
-    inter_count = 0;
-    for (int i = 0; i < n_undirected_edges; i++) {
-        if (get_cluster(edge_src[i]) == get_cluster(edge_dst[i])) {
-            intra_count++;
-        } else {
-            inter_count++;
+    min_w = h_sorted_weights[0];
+
+    // Get 99th quantile
+    int q_idx = (int)(QUANTILE_Q * n_total_edge);
+    if (q_idx >= n_total_edge) q_idx = n_total_edge - 1;
+    double w_quantile = h_sorted_weights[q_idx]; 
+    printf("Weight quantile (%.3f): %.6f\n", QUANTILE_Q, w_quantile);
+
+    // Get cut-off points
+    int n_cutoff=0;
+    double w_stop = 1.1 * min_w;
+    int cutoff_idx;
+    double threshold;
+
+    for (idx=0; idx<n_total_edge; idx +=2){
+        // idx+=2 because the weights store both (i, j) and (j, i) for completeness
+        if (h_sorted_weights[idx] > w_quantile){
+            n_cutoff++;
         }
     }
-    printf("Intra-cluster edges: %d (%.1f%%)\n", intra_count, 100.0*intra_count/n_undirected_edges);
-    printf("Inter-cluster edges: %d (%.1f%%)\n", inter_count, 100.0*inter_count/n_undirected_edges);
+    for (double t = w_quantile - DELTA_STEP; t >= w_stop; t -= DELTA_STEP) {
+        n_cutoff++;
+    }
 
-    // =========================================================================
-    // Threshold Search with Improved Stable Region Detection
-    // =========================================================================
-    printf("\n=== Cutoff Search (with modularity-based selection) ===\n");
-    printf("%-15s %-12s %-12s %-12s\n", "Threshold", "Communities", "Modularity", "Status");
+    double *cutoff_list = (double*)malloc(n_cutoff * sizeof(double));
 
-    // int component_idx=0;
+    cutoff_idx = 0;
+    for (idx=0; idx<n_total_edge; idx +=2){
+        // idx+=2 because the weights store both (i, j) and (j, i) for completeness
+        // if (h_sorted_weights[idx] > w_quantile){
+        //     cutoff_list[cutoff_idx++] = h_sorted_weights[idx];
+        // }
+        if (h_sorted_weights[idx] > w_quantile) {
+            if (cutoff_idx == 0 || h_sorted_weights[idx] != cutoff_list[cutoff_idx - 1]) {
+                    cutoff_list[cutoff_idx++] = h_sorted_weights[idx];
+            }
+        }
+    }
+    for (double t = w_quantile - DELTA_STEP; t >= w_stop; t -= DELTA_STEP) {
+        cutoff_list[cutoff_idx++] = t;
+    }
+    n_cutoff = cutoff_idx;
+
     int *h_component_list, *d_component_list;
     int *d_dist_arr;
     int *d_still_running;
 
-    float epsilon = 0.001f;       // Modularity stability threshold
-    float min_modularity = 0.8f;  // Minimum acceptable modularity
-
-    // Track the best stable region (longest consecutive same communities)
-    int best_stable_length = 0;
-    float best_stable_threshold = 0.0f;
-    int best_stable_communities = 0;
-    float best_stable_modularity = 0.0f;
-
-    // Current stable region tracking
-    int current_stable_length = 0;
-    float current_stable_start = 0.0f;
-    int prev_communities = -1;
-    float prev_modularity = -1.0f;
-
-    // Also track best modularity overall
-    float best_modularity = -1.0f;
-    float best_threshold = 0.0f;
-    int best_communities = 0;
+    double best_modularity = -1.0;
+    double best_threshold = 0.0;
+    int best_n_communities = 0;
+    double best_nmi = 0.0;
+    int *h_best_labels;
 
     cudaMalloc(&d_still_running, sizeof(int));
-    h_component_list = (int*) malloc(N_NODE * sizeof(int));
+    h_component_list = (int*) malloc(N_NODE * sizeof(int));    
     cudaMalloc(&d_component_list, N_NODE * sizeof(int));  
     cudaMalloc(&d_dist_arr, N_NODE * sizeof(int));
 
-    for (int i = 0; i <= 200; i++) {
-        float threshold = min_w + (max_w - min_w) * i / 200.0f;
-        
-        // int n_communities = find_connected_components_cpu_reference(
-        //     v_adj_list, v_adj_begin, v_adj_length,
-        //     h_edge_weight, threshold, h_component_list, N_NODE);
+    h_best_labels = (int*)malloc(N_NODE * sizeof(int));
 
+    struct Result {
+        double threshold;
+        int n_communities;
+        double modularity;
+        double nmi;
+    };
+    std::vector<Result> all_results; // No point being a C purist at this point lol 
+
+    for (cutoff_idx=0; cutoff_idx<n_cutoff; cutoff_idx+=1){
+        threshold = cutoff_list[cutoff_idx]; 
         int n_communities = bfs_loop_using_virtual_warp_for_cc_labeling_wrapper(
             d_v_adj_list, d_v_adj_begin, d_v_adj_length,
             d_edge_src, d_edge_dst,
@@ -1653,136 +1748,201 @@ int main(){
             d_still_running,
             threshold
         );
-        
+
         if (n_communities < 2 || n_communities > N_NODE / 2) {
-            prev_communities = -1;
-            current_stable_length = 0;
             continue;
         }
         
-        float modularity = calculate_modularity_cpu_reference(
+        double modularity = calculate_modularity(
             v_adj_list, v_adj_begin, v_adj_length,
             h_component_list, N_NODE, n_undirected_edges);
         
-        char status[64] = "";
+        double nmi = calculate_nmi(h_component_list, node_cluster, N_NODE, 
+                                  n_communities, N_CLUSTERS);
+
+        all_results.push_back({threshold, n_communities, modularity, nmi});
         
-        // Track stable regions (same number of communities with similar modularity)
-        if (n_communities == prev_communities && 
-            fabsf(modularity - prev_modularity) < epsilon) {
-            current_stable_length++;
-        } else {
-            // New region started - check if previous was best
-            if (current_stable_length > best_stable_length && 
-                prev_modularity > min_modularity &&
-                prev_communities > 2) {  // Don't want trivial solutions
-                best_stable_length = current_stable_length;
-                best_stable_threshold = current_stable_start;
-                best_stable_communities = prev_communities;
-                best_stable_modularity = prev_modularity;
-            }
-            // Start new region
-            current_stable_length = 1;
-            current_stable_start = threshold;
+        if (n_communities <= 30) {
+            char marker = (modularity > best_modularity) ? '*' : ' ';
+            printf("%.6e  %-12d %-12.6f %-10.4f %c\n", 
+                   threshold, n_communities, modularity, nmi, marker);
         }
         
-        // Mark stable regions in output
-        if (current_stable_length == 3) {
-            sprintf(status, " ** STABLE START **");
-        } else if (current_stable_length > 3 && current_stable_length % 10 == 0) {
-            sprintf(status, " (stable x%d)", current_stable_length);
+        if (modularity > best_modularity) {
+            best_modularity = modularity;
+            best_threshold = threshold;
+            best_n_communities = n_communities;
+            best_nmi = nmi;
+            memcpy(h_best_labels, h_component_list, N_NODE * sizeof(int));
         }
-        
-        // Track best modularity (with penalty for too few communities)
-        if (modularity > min_modularity && n_communities >= 3) {
-            if (modularity > best_modularity) {
-                best_modularity = modularity;
-                best_threshold = threshold;
-                best_communities = n_communities;
-            }
-        }
-        
-        // Print results for small community counts
-        if (n_communities <= 20) {
-            printf("%.10e  %-12d %-12.6f %s\n", threshold, n_communities, modularity, status);
-        }
-        
-        prev_communities = n_communities;
-        prev_modularity = modularity;
     }
 
-    // Check final region
-    if (current_stable_length > best_stable_length && 
-        prev_modularity > min_modularity &&
-        prev_communities > 2) {
-        best_stable_length = current_stable_length;
-        best_stable_threshold = current_stable_start;
-        best_stable_communities = prev_communities;
-        best_stable_modularity = prev_modularity;
+    // Now find connected components using the best threshold
+    bfs_loop_using_virtual_warp_for_cc_labeling_wrapper(
+        d_v_adj_list, d_v_adj_begin, d_v_adj_length,
+        d_edge_src, d_edge_dst,
+        d_edge_weight,
+        h_best_labels, d_component_list,
+        d_dist_arr, 
+        d_still_running,
+        best_threshold
+    );
+    double final_nmi = calculate_nmi(h_best_labels, node_cluster, N_NODE, 
+                                    best_n_communities, N_CLUSTERS);
+
+    // ...
+
+
+    // Threshold Search
+    // printf("\n[4/4] Searching for optimal threshold...\n");
+    // printf("=== Threshold Search (Modularity-based) ===\n");
+    
+    // std::sort(all_weights.begin(), all_weights.end());
+    // int q_idx = (int)(QUANTILE_Q * all_weights.size());
+    // q_idx = std::min(q_idx, (int)all_weights.size() - 1);
+    // double w_quantile = all_weights[q_idx];
+    
+    // printf("Weight quantile (%.3f): %.6f\n", QUANTILE_Q, w_quantile);
+    
+    // std::vector<double> cutoffs;
+    
+    // std::vector<double> unique_weights = all_weights;
+    // std::sort(unique_weights.rbegin(), unique_weights.rend());
+    // unique_weights.erase(std::unique(unique_weights.begin(), unique_weights.end()), 
+    //                      unique_weights.end());
+    
+    // for (double w : unique_weights) {
+    //     if (w >= w_quantile) {
+    //         cutoffs.push_back(w);
+    //     }
+    // }
+    
+    // double w_stop = 1.1 * min_w;
+    // for (double t = w_quantile - DELTA_STEP; t >= w_stop; t -= DELTA_STEP) {
+    //     cutoffs.push_back(t);
+    // }
+    
+    // printf("Generated %zu cutoff points\n", cutoffs.size());
+    
+    // int *component_id = (int*)malloc(N_NODE * sizeof(int));
+    // double best_modularity = -1.0;
+    // double best_threshold = 0.0;
+    // int best_n_communities = 0;
+    // double best_nmi = 0.0;
+    // int *best_labels = (int*)malloc(N_NODE * sizeof(int));
+    
+    // struct Result {
+    //     double threshold;
+    //     int n_communities;
+    //     double modularity;
+    //     double nmi;
+    // };
+    // std::vector<Result> all_results;
+    
+    // printf("\n%-15s %-12s %-12s %-10s\n", "Threshold", "Communities", "Modularity", "NMI");
+    // printf("----------------------------------------------------\n");
+    
+    // for (size_t i = 0; i < cutoffs.size(); i++) {
+    //     double threshold = cutoffs[i];
+        
+    //     int n_communities = find_connected_components(
+    //         v_adj_list, v_adj_begin, v_adj_length,
+    //         h_edge_weight, threshold, component_id, N_NODE);
+        
+    //     if (n_communities < 2 || n_communities > N_NODE / 2) {
+    //         continue;
+    //     }
+        
+    //     double modularity = calculate_modularity(
+    //         v_adj_list, v_adj_begin, v_adj_length,
+    //         component_id, N_NODE, n_undirected_edges);
+        
+    //     double nmi = calculate_nmi(component_id, node_cluster, N_NODE, 
+    //                               n_communities, N_CLUSTERS);
+        
+    //     all_results.push_back({threshold, n_communities, modularity, nmi});
+        
+    //     if (n_communities <= 30) {
+    //         char marker = (modularity > best_modularity) ? '*' : ' ';
+    //         printf("%.6e  %-12d %-12.6f %-10.4f %c\n", 
+    //                threshold, n_communities, modularity, nmi, marker);
+    //     }
+        
+    //     if (modularity > best_modularity) {
+    //         best_modularity = modularity;
+    //         best_threshold = threshold;
+    //         best_n_communities = n_communities;
+    //         best_nmi = nmi;
+    //         memcpy(best_labels, component_id, N_NODE * sizeof(int));
+    //     }
+    // }
+    
+    // // Secondary selection for better NMI
+    // double high_mod_threshold = best_modularity * 0.95;
+    // for (const auto& r : all_results) {
+    //     if (r.modularity >= high_mod_threshold && r.nmi > best_nmi) {
+    //         best_threshold = r.threshold;
+    //         best_n_communities = r.n_communities;
+    //         best_modularity = r.modularity;
+    //         best_nmi = r.nmi;
+    //     }
+    // }
+    
+    // find_connected_components(
+    //     v_adj_list, v_adj_begin, v_adj_length,
+    //     h_edge_weight, best_threshold, best_labels, N_NODE);
+    
+    // double final_nmi = calculate_nmi(best_labels, node_cluster, N_NODE, 
+    //                                 best_n_communities, N_CLUSTERS);
+    
+    // Final Results
+    printf("\n=======================================================================\n");
+    printf("=== FINAL RESULTS ===\n");
+    printf("=======================================================================\n");
+    printf("Threshold: %.6e\n", best_threshold);
+    printf("Communities found: %d (ground truth: %d)\n", best_n_communities, N_CLUSTERS);
+    printf("Modularity: %.6f\n", best_modularity);
+    printf("NMI: %.6f\n", final_nmi);
+    
+    int *community_sizes = (int*)calloc(best_n_communities, sizeof(int));
+    for (int i = 0; i < N_NODE; i++) {
+        if (h_best_labels[i] >= 0 && h_best_labels[i] < best_n_communities) {
+            community_sizes[h_best_labels[i]]++;
+        }
+    }
+    
+    printf("\nCommunity sizes:\n");
+    for (int c = 0; c < best_n_communities && c < 15; c++) {
+        printf("  Community %d: %d nodes\n", c, community_sizes[c]);
+    }
+    if (best_n_communities > 15) {
+        printf("  ... (%d more communities)\n", best_n_communities - 15);
     }
 
-    printf("\n=== Final Selection ===\n");
-    printf("Longest stable region:\n");
-    printf("  Threshold: %.10e\n", best_stable_threshold);
-    printf("  Communities: %d\n", best_stable_communities);
-    printf("  Modularity: %.6f\n", best_stable_modularity);
-    printf("  Stability length: %d consecutive thresholds\n", best_stable_length);
-
-    printf("\nHighest modularity:\n");
-    printf("  Threshold: %.10e\n", best_threshold);
-    printf("  Communities: %d\n", best_communities);
-    printf("  Modularity: %.6f\n", best_modularity);
-
-    printf("\nGround truth: %d clusters\n", N_CLUSTERS);
-
-    // Use the stable region for final clustering
-    printf("\n=== Using Stable Region Result ===\n");
-
-    int n_communities = bfs_loop_using_virtual_warp_for_cc_labeling_wrapper(
-            d_v_adj_list, d_v_adj_begin, d_v_adj_length,
-            d_edge_src, d_edge_dst,
-            d_edge_weight,
-            h_component_list, d_component_list,
-            d_dist_arr, 
-            d_still_running,
-            best_stable_threshold
-        );
-    printf("%d\n", n_communities);
-
-    // =========================================================================
-    // Save graph and clustering results to file
-    // =========================================================================
-    printf("\n=== Saving graph to file ===\n");
-
+    // ==========================================================================
+    // Save graph to file
+    // ==========================================================================
     FILE *fp = fopen("graph_output.txt", "w");
-    if (fp == NULL) {
-        printf("Error: Could not open file for writing\n");
-    } else {
-        // First line: N M
+    if (fp) {
+        // Header: num_nodes, num_edges
         fprintf(fp, "%d %d\n", N_NODE, n_undirected_edges);
         
-        // Next M lines: src dst (edges)
+        // Edges: src dst
         for (int i = 0; i < n_undirected_edges; i++) {
             fprintf(fp, "%d %d\n", edge_src[i], edge_dst[i]);
         }
         
-        // Next N lines: component assignment for each node
+        // Cluster assignments (predicted)
         for (int i = 0; i < N_NODE; i++) {
-            fprintf(fp, "%d\n", h_component_list[i]);
+            fprintf(fp, "%d\n", h_best_labels[i]);
         }
         
         fclose(fp);
-        printf("Graph saved to graph_output.txt\n");
-        printf("  Nodes: %d\n", N_NODE);
-        printf("  Edges: %d\n", n_undirected_edges);
-        printf("  Communities: %d\n", best_stable_communities);
+        printf("\nSaved graph to graph_output.txt\n");
+    } else {
+        printf("\nError: Could not open graph_output.txt for writing\n");
     }
 
-    // find_connected_components_cpu_reference(
-    //     v_adj_list, v_adj_begin, v_adj_length,
-    //     h_edge_weight, best_stable_threshold, h_component_list, N_NODE);
-
-    // free(h_component_list);
-    
     // =========================================================================
     // Cleanup
     // =========================================================================
@@ -1800,7 +1960,7 @@ int main(){
     cudaFree(d_dist_arr);
     cudaFree(d_still_running);
     cudaFree(d_edge_weight_padded);
-    cudaFree(d_faces);
+    // cudaFree(d_faces);
 
     // Host memory
     free(v_adj_list);
@@ -1814,5 +1974,9 @@ int main(){
     free(h_partial_sum);
     free(h_component_list);
     free(h_sorted_weights);
-    free(h_edge_weight_padded);  
+    // free(h_edge_weight_padded);  
+    free(h_best_labels);
+    free(cutoff_list);
+    free(community_sizes);
+    free(node_cluster);
 }
