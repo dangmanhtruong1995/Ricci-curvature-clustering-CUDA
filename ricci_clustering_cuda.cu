@@ -76,7 +76,7 @@
 #define N_NODE 500000
 #define N_CLUSTERS 500
 #define NODES_PER_CLUSTER 1000
-#define P_IN 0.9     
+#define P_IN 0.65     // ~15 neighbors
 #define P_OUT 0.0005
 
 // Ratio between expected intra-cluster connections and inter-cluster connections
