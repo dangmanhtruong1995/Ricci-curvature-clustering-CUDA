@@ -96,4 +96,4 @@ python visualize_graph_large_optimized.py
 
 ## License
 
-*Add your license here*
+MIT License.
