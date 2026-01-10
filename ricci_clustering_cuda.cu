@@ -31,17 +31,17 @@
 // #define P_IN 0.4
 // #define P_OUT 0.01
 
-#define N_NODE 5000
-#define NODES_PER_CLUSTER 1000
-#define N_CLUSTERS 5
-#define P_IN 0.5
-#define P_OUT 0.01
-
-// #define N_NODE 50000
-// #define NODES_PER_CLUSTER 25000
-// #define N_CLUSTERS 2
+// #define N_NODE 5000
+// #define NODES_PER_CLUSTER 1000
+// #define N_CLUSTERS 5
 // #define P_IN 0.5
 // #define P_OUT 0.01
+
+#define N_NODE 5000
+#define NODES_PER_CLUSTER 500
+#define N_CLUSTERS 10
+#define P_IN 0.7
+#define P_OUT 0.01
 
 // 1. Calculate nodes per cluster (n)
 #define N_PER_C ((double)N_NODE / N_CLUSTERS)
