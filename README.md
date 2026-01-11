@@ -69,15 +69,9 @@ Saved graph to graph_output.txt
 
 ### 4. Visualization
 
-The output graph and detected clusters are saved to `graph_output.txt`. Use one of the provided visualization scripts:
+The output graph and detected clusters are saved to `graph_output.txt`. Use the provided visualization scripts:
 ```bash
-python visualize_graph.py
-# or
 python visualize_graph_large.py
-# or
-python visualize_graph_improved.py
-# or
-python visualize_graph_large_optimized.py
 ```
 
 ## Results
