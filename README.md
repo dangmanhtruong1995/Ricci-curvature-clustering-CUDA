@@ -82,7 +82,11 @@ python visualize_graph_large_optimized.py
 
 ## Results
 
-*Experiments with 1,000 nodes and varying cluster configurations — results table coming soon.*
+| Nodes | Clusters | Edges | P_in | P_out | Iterations | Avg Time (s) |
+|------:|:--------:|------:|-----:|------:|:----------:|-------------:|
+| 5,000 | 2 | 3,186,679 | 0.50 | 0.01 | 10 | 7.03 |
+| 50,000 | 2 | 25,625,893 | 0.04 | 0.001 | 10 | 74.39 |
+| 100,000 | 2 | 102,498,762 | 0.04 | 0.001 | 10 | 625.46 |
 
 ## References
 

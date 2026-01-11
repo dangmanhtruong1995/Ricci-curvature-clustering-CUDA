@@ -19,11 +19,11 @@
 #include <thrust/scan.h>
 #include <thrust/fill.h>
 
-// #define N_NODE 1000
-// #define NODES_PER_CLUSTER 500
-// #define N_CLUSTERS 2
-// #define P_IN 0.12
-// #define P_OUT 0.01
+#define N_NODE 1000
+#define NODES_PER_CLUSTER 500
+#define N_CLUSTERS 2
+#define P_IN 0.12
+#define P_OUT 0.01
 
 // #define N_NODE 1000
 // #define NODES_PER_CLUSTER 500
@@ -73,11 +73,17 @@
 // #define P_IN 0.4      
 // #define P_OUT 0.0005
 
-#define N_NODE 500000
-#define N_CLUSTERS 500
-#define NODES_PER_CLUSTER 1000
-#define P_IN 0.65     // ~15 neighbors
-#define P_OUT 0.0005
+// #define N_NODE 500000
+// #define N_CLUSTERS 500
+// #define NODES_PER_CLUSTER 1000
+// #define P_IN 0.65     // ~15 neighbors
+// #define P_OUT 0.0005
+
+// #define N_NODE 1000
+// #define NODES_PER_CLUSTER 500
+// #define N_CLUSTERS 2
+// #define P_IN 0.1
+// #define P_OUT 0.01
 
 // Ratio between expected intra-cluster connections and inter-cluster connections
 // (P_in*(N/N_C-1))/(P_out*(N-N/N_C))
@@ -112,6 +118,7 @@
 
 #define MIN_WEIGHT 1e-6
 #define MAX_CURVATURE 1000.0
+// #define MAX_CURVATURE 100000.0
 #define MIN_AREA 1e-12
 #define MAX_TRIANGLE_CONTRIB 100.0
 
