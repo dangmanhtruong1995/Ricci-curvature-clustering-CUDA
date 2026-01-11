@@ -18,7 +18,54 @@
 #include <thrust/device_ptr.h>
 #include <thrust/scan.h>
 #include <thrust/fill.h>
- 
+
+
+// =========================================================================
+// Try these configs first
+// =========================================================================
+
+/* Average: 7.0298s*/
+// Number of undirected edges: 3186679 (approx. 3 mils)
+// #define N_NODE 5000
+// #define NODES_PER_CLUSTER 2500
+// #define N_CLUSTERS 2
+// #define P_IN 0.5
+// #define P_OUT 0.01
+// #define N_ITERATION 10
+// #define MAX_CURVATURE 1000.0
+
+/* Average: 74.388s*/
+// Number of undirected edges: 25625893 (approx. 25 mils)
+// #define N_NODE 50000
+// #define NODES_PER_CLUSTER 25000
+// #define N_CLUSTERS 2
+// #define P_IN 0.04
+// #define P_OUT 0.001
+// #define N_ITERATION 10
+// #define MAX_CURVATURE 100000.0
+
+/* Average: 625.4565*/
+// Number of undirected edges: 102498762 (approx. 102 mils)
+// #define N_NODE 100000 
+// #define NODES_PER_CLUSTER 50000
+// #define N_CLUSTERS 2
+// #define P_IN 0.04
+// #define P_OUT 0.001
+// #define N_ITERATION 10
+// #define MAX_CURVATURE 100000.0
+
+/* Average: 1086.255 s*/
+// Number of undirected edges: 126212351 (approx. 125 mils.)
+#define N_NODE 500000
+#define NODES_PER_CLUSTER 10000
+#define N_CLUSTERS 50
+#define P_IN 0.05
+#define P_OUT 0.00001
+#define N_ITERATION 20
+#define MAX_CURVATURE 100000.0
+
+// =========================================================================
+
 // #define N_NODE 1000
 // #define NODES_PER_CLUSTER 500
 // #define N_CLUSTERS 2
@@ -52,35 +99,7 @@
 // #define N_ITERATION 10
 // #define MAX_CURVATURE 1000.0
 
-/* Average: 7.0298s*/
-// Number of undirected edges: 3186679 (approx. 3 mils)
-// #define N_NODE 5000
-// #define NODES_PER_CLUSTER 2500
-// #define N_CLUSTERS 2
-// #define P_IN 0.5
-// #define P_OUT 0.01
-// #define N_ITERATION 10
-// #define MAX_CURVATURE 1000.0
 
-/* Average: 74.388s*/
-// Number of undirected edges: 25625893 (approx. 25 mils)
-// #define N_NODE 50000
-// #define NODES_PER_CLUSTER 25000
-// #define N_CLUSTERS 2
-// #define P_IN 0.04
-// #define P_OUT 0.001
-// #define N_ITERATION 10
-// #define MAX_CURVATURE 100000.0
-
-/* Average: 625.4565*/
-// Number of undirected edges: 102498762 (approx. 102 mils)
-#define N_NODE 100000 
-#define NODES_PER_CLUSTER 50000
-#define N_CLUSTERS 2
-#define P_IN 0.04
-#define P_OUT 0.001
-#define N_ITERATION 10
-#define MAX_CURVATURE 100000.0
 
 // Number of undirected edges: 410020504 (approx. 410 mils)
 // #define N_NODE 200000 
@@ -127,6 +146,8 @@
 // #define NODES_PER_CLUSTER 1000
 // #define P_IN 0.55     // ~15 neighbors
 // #define P_OUT 0.0005
+
+
 
 // Ratio between expected intra-cluster connections and inter-cluster connections
 // (P_in*(N/N_C-1))/(P_out*(N-N/N_C))
