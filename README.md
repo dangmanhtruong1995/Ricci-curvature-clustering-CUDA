@@ -84,6 +84,10 @@ python visualize_graph_large.py
 | 50,000 | 2 | 25,625,893 | 0.04 | 0.001 | 10 | 74.39 |
 | 100,000 | 2 | 102,498,762 | 0.04 | 0.001 | 10 | 625.46 |
 
+An example: 
+
+<img width="693" height="590" alt="Image" src="https://github.com/user-attachments/assets/51b51ee2-6cf4-405e-af00-fb592beb6cfb" />
+
 ## References
 
 1. Y. Tian, Z. Lubberts, and M. Weber, "Curvature-based clustering on graphs," *J. Mach. Learn. Res.*, vol. 26, no. 52, pp. 1–67, 2025.
