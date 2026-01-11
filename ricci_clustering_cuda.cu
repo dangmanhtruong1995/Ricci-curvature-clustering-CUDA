@@ -74,13 +74,13 @@
 
 /* Average: 625.4565*/
 // Number of undirected edges: 102498762 (approx. 102 mils)
-// #define N_NODE 100000 
-// #define NODES_PER_CLUSTER 50000
-// #define N_CLUSTERS 2
-// #define P_IN 0.04
-// #define P_OUT 0.001
-// #define N_ITERATION 10
-// #define MAX_CURVATURE 100000.0
+#define N_NODE 100000 
+#define NODES_PER_CLUSTER 50000
+#define N_CLUSTERS 2
+#define P_IN 0.04
+#define P_OUT 0.001
+#define N_ITERATION 10
+#define MAX_CURVATURE 100000.0
 
 // Number of undirected edges: 410020504 (approx. 410 mils)
 // #define N_NODE 200000 
