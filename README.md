@@ -82,6 +82,8 @@ python visualize_graph_large_optimized.py
 
 ## Results
 
+**Hardware:** Experiments were performed on a PC with 64GB RAM and an NVIDIA GeForce RTX 4090 (24GB VRAM).
+
 | Nodes | Clusters | Edges | P_in | P_out | Iterations | Avg Time (s) |
 |------:|:--------:|------:|-----:|------:|:----------:|-------------:|
 | 5,000 | 2 | 3,186,679 | 0.50 | 0.01 | 10 | 7.03 |

@@ -18,12 +18,12 @@
 #include <thrust/device_ptr.h>
 #include <thrust/scan.h>
 #include <thrust/fill.h>
-
-#define N_NODE 1000
-#define NODES_PER_CLUSTER 500
-#define N_CLUSTERS 2
-#define P_IN 0.12
-#define P_OUT 0.01
+ 
+// #define N_NODE 1000
+// #define NODES_PER_CLUSTER 500
+// #define N_CLUSTERS 2
+// #define P_IN 0.12
+// #define P_OUT 0.01
 
 // #define N_NODE 1000
 // #define NODES_PER_CLUSTER 500
@@ -37,6 +37,7 @@
 // #define P_IN 0.4
 // #define P_OUT 0.01
 
+/* 1.307 s, 1.304 s, 1.308 s, 1.311 s, 1.312 s*/
 // #define N_NODE 5000
 // #define NODES_PER_CLUSTER 1000
 // #define N_CLUSTERS 5
@@ -48,6 +49,47 @@
 // #define N_CLUSTERS 10
 // #define P_IN 0.7
 // #define P_OUT 0.01
+// #define N_ITERATION 10
+// #define MAX_CURVATURE 1000.0
+
+/* Average: 7.0298s*/
+// Number of undirected edges: 3186679 (approx. 3 mils)
+// #define N_NODE 5000
+// #define NODES_PER_CLUSTER 2500
+// #define N_CLUSTERS 2
+// #define P_IN 0.5
+// #define P_OUT 0.01
+// #define N_ITERATION 10
+// #define MAX_CURVATURE 1000.0
+
+/* Average: 74.388s*/
+// Number of undirected edges: 25625893 (approx. 25 mils)
+// #define N_NODE 50000
+// #define NODES_PER_CLUSTER 25000
+// #define N_CLUSTERS 2
+// #define P_IN 0.04
+// #define P_OUT 0.001
+// #define N_ITERATION 10
+// #define MAX_CURVATURE 100000.0
+
+/* Average: 625.4565*/
+// Number of undirected edges: 102498762 (approx. 102 mils)
+// #define N_NODE 100000 
+// #define NODES_PER_CLUSTER 50000
+// #define N_CLUSTERS 2
+// #define P_IN 0.04
+// #define P_OUT 0.001
+// #define N_ITERATION 10
+// #define MAX_CURVATURE 100000.0
+
+// Number of undirected edges: 410020504 (approx. 410 mils)
+// #define N_NODE 200000 
+// #define NODES_PER_CLUSTER 100000
+// #define N_CLUSTERS 2
+// #define P_IN 0.04
+// #define P_OUT 0.001
+// #define N_ITERATION 10
+// #define MAX_CURVATURE 100000.0
 
 // #define N_NODE 50000
 // #define NODES_PER_CLUSTER 10000
@@ -73,17 +115,18 @@
 // #define P_IN 0.4      
 // #define P_OUT 0.0005
 
+/* 264.706 s*/
 // #define N_NODE 500000
 // #define N_CLUSTERS 500
 // #define NODES_PER_CLUSTER 1000
-// #define P_IN 0.65     // ~15 neighbors
+// #define P_IN 0.6     // ~15 neighbors
 // #define P_OUT 0.0005
 
-// #define N_NODE 1000
-// #define NODES_PER_CLUSTER 500
-// #define N_CLUSTERS 2
-// #define P_IN 0.1
-// #define P_OUT 0.01
+// #define N_NODE 1000000
+// #define N_CLUSTERS 1000
+// #define NODES_PER_CLUSTER 1000
+// #define P_IN 0.55     // ~15 neighbors
+// #define P_OUT 0.0005
 
 // Ratio between expected intra-cluster connections and inter-cluster connections
 // (P_in*(N/N_C-1))/(P_out*(N-N/N_C))
@@ -103,7 +146,7 @@
 
 // #define N_EDGES_MAX 1100000
 
-#define N_ITERATION 10
+// #define N_ITERATION 10
 
 #define BLOCK_SIZE 256 // CUDA maximum is 1024
 #define VERY_LARGE_NUMBER 99999
@@ -113,11 +156,13 @@
 #define STEP_SCALE 1.1f      // νt = 1 / (1.1 × max|κ|)
 #define QUANTILE_Q 0.999f    // q = 0.999 for cutoff
 #define DELTA_STEP 0.25f     // δ = 0.25 for uniform spacing
+// #define DELTA_STEP 0.0001f
+
 // #define DROP_THRESHOLD 0.1f  // d = 0.1 (skip if improvement < 10%)
 // #define MIN_MODULARITY 0.0f  // ε for minimum acceptable modularity
 
 #define MIN_WEIGHT 1e-6
-#define MAX_CURVATURE 1000.0
+// #define MAX_CURVATURE 1000.0
 // #define MAX_CURVATURE 100000.0
 #define MIN_AREA 1e-12
 #define MAX_TRIANGLE_CONTRIB 100.0
@@ -183,7 +228,8 @@ void prefix_sum_exclusive(int *arr, int *result, int n) {
     }
 }
 
-unsigned int next_power_of_2(unsigned int n) {
+// unsigned int next_power_of_2(unsigned int n) {
+size_t next_power_of_2(size_t n) {
     // https://graphics.stanford.edu/%7Eseander/bithacks.html#RoundUpPowerOf2
     // The code works for 32 bit data types
     if (n == 0) return 1;
@@ -194,6 +240,7 @@ unsigned int next_power_of_2(unsigned int n) {
     n |= n >> 4;
     n |= n >> 8;
     n |= n >> 16;
+    n |= n >> 32; // For 64 bit
     return n + 1;
 }
 
@@ -406,6 +453,11 @@ void create_sbm_graph(
         (*node_cluster)[idx] = get_cluster(idx);
     }
 
+    int cluster_1;
+    int cluster_2;
+    int n_intra_connect=0;
+    int n_inter_connect=0;
+
     // Generate edges based on SBM probabilities
     *n_undirected_edges = 0;
     for (idx_1 = 0; idx_1 < N_NODE; idx_1++) {
@@ -416,6 +468,15 @@ void create_sbm_graph(
             random_number = (double)rand() / (double)(RAND_MAX);
             
             if (random_number <= edge_prob) {
+                cluster_1 = get_cluster(idx_1);
+                cluster_2 = get_cluster(idx_2);
+
+                if (cluster_1 == cluster_2){
+                    n_intra_connect++;
+                } else {
+                    n_inter_connect++;
+                }
+
                 (*edge_src)[*n_undirected_edges] = idx_1;
                 (*edge_dst)[*n_undirected_edges] = idx_2;
 
@@ -433,6 +494,9 @@ void create_sbm_graph(
             break;
         }
     }
+
+    printf("Number of intra-clusters connection: %d\n", n_intra_connect);
+    printf("Number of inter-clusters connection: %d\n", n_inter_connect);
 
     // Build adjacency list
     n_total_edge = *n_undirected_edges * 2;
@@ -825,10 +889,12 @@ int bfs_loop_using_virtual_warp_for_cc_labeling_wrapper(
     // Initialize (needs to do this each time the function is called)
     n_block = (N_NODE+BLOCK_SIZE-1)/BLOCK_SIZE; 
     init_on_device<<<n_block, BLOCK_SIZE>>>(d_component_list, N_NODE, -1);    
+    cudaCheckErrors("init_on_device failed.");
     cudaDeviceSynchronize();
     cudaMemcpy(h_component_list, d_component_list, N_NODE * sizeof(int), cudaMemcpyDeviceToHost);    
     
     init_on_device<<<n_block, BLOCK_SIZE>>>(d_dist_arr, N_NODE, VERY_LARGE_NUMBER);
+    cudaCheckErrors("init_on_device failed.");
     cudaDeviceSynchronize();
     // cudaMemcpy(h_dist_arr, d_dist_arr, N_NODE * sizeof(int), cudaMemcpyDeviceToHost);    
 
@@ -1445,6 +1511,8 @@ int main(){
         cudaDeviceSynchronize();
 
         cudaMemcpy(h_partial_sum, d_partial_sum, n_block*sizeof(double), cudaMemcpyDeviceToHost );
+        cudaCheckErrors("Copy d_partial_sum to h_partial_sum failed.");
+
         edge_weight_sum = 0.0;
         for (idx=0; idx<n_block; idx++) {
             edge_weight_sum += h_partial_sum[idx];
@@ -1453,6 +1521,7 @@ int main(){
         n_block = (n_total_edge + BLOCK_SIZE - 1) / BLOCK_SIZE;
         normalize_weights<<<n_block, BLOCK_SIZE>>>(
             d_edge_weight, edge_weight_sum, n_undirected_edges, n_total_edge);
+        cudaCheckErrors("normalize_weights failed.");
         cudaDeviceSynchronize();
 
         // clamp_weights_after_norm<<<n_block, BLOCK_SIZE>>>(d_edge_weight, n_total_edge);
@@ -1468,6 +1537,7 @@ int main(){
 
     // Copy final weights back
     cudaMemcpy(h_edge_weight, d_edge_weight, n_total_edge * sizeof(double), cudaMemcpyDeviceToHost);
+    cudaCheckErrors("Copy from d_edge_weight to h_edge_weight failed.");
 
     // Analyze weight distribution
     double min_w = 1e9f, max_w = -1e9f;
@@ -1516,10 +1586,13 @@ int main(){
     cudaEventRecord(start);
 
     // Sort the weights in ascending order
-    unsigned int next_pow = next_power_of_2(n_total_edge);
+    // unsigned int next_pow = next_power_of_2(n_total_edge);
+    /*
+    size_t next_pow = next_power_of_2(n_total_edge);
     double *d_edge_weight_padded;
     // h_edge_weight_padded = (double*)malloc(next_pow * sizeof(double));
     cudaMalloc((void**)&d_edge_weight_padded, next_pow * sizeof(double));
+    cudaCheckErrors("cudaMalloc for d_edge_weight_padded failed.");
 
     n_block = (next_pow + BLOCK_SIZE - 1) / BLOCK_SIZE;    
     copy_with_pad <<<n_block, BLOCK_SIZE>>>(d_edge_weight, d_edge_weight_padded, n_total_edge, next_pow);
@@ -1530,6 +1603,7 @@ int main(){
         for (j = k >> 1; j > 0; j = j >> 1)
         {            
             bitonicSortGPU <<<n_block, BLOCK_SIZE>>>(d_edge_weight_padded, j, k);
+            cudaCheckErrors("bitonicSortGPU failed.");
             cudaDeviceSynchronize();
         }
     }   
@@ -1537,6 +1611,25 @@ int main(){
     // Copy sorted weights back to host
     double *h_sorted_weights = (double*)malloc(n_total_edge * sizeof(double));
     cudaMemcpy(h_sorted_weights, d_edge_weight_padded, n_total_edge * sizeof(double), cudaMemcpyDeviceToHost);
+    cudaCheckErrors("Copy from d_edge_weight_padded to h_sorted_weights failed.");
+    */
+
+    cudaFree(d_edge_curvature);
+    d_edge_curvature = NULL;
+
+    double *h_sorted_weights = (double*)malloc(n_total_edge * sizeof(double));
+    double *d_edge_weight_sorted;
+    cudaMalloc(&d_edge_weight_sorted, (size_t)n_total_edge * sizeof(double));
+    cudaMemcpy(d_edge_weight_sorted, d_edge_weight, (size_t)n_total_edge * sizeof(double), cudaMemcpyDeviceToDevice);
+    cudaCheckErrors("Copy d_edge_weight to d_edge_weight_sorted (device-to-device) failed.");
+
+    thrust::device_ptr<double> d_ptr(d_edge_weight_sorted);
+    thrust::sort(d_ptr, d_ptr + n_total_edge);
+
+    cudaMemcpy(h_sorted_weights, d_edge_weight_sorted, (size_t)n_total_edge * sizeof(double), cudaMemcpyDeviceToHost);
+    cudaCheckErrors("Copy d_edge_weight_sorted to h_sorted_weights failed.");
+
+    cudaFree(d_edge_weight_sorted);
 
     // Print sorted weights
     printf("\n=== Sorted Weights (ascending) ===\n");
@@ -1724,12 +1817,12 @@ int main(){
     cudaFree(d_edge_src);
     cudaFree(d_edge_dst);
     cudaFree(d_edge_weight);
-    cudaFree(d_edge_curvature);
+    // cudaFree(d_edge_curvature);
     cudaFree(d_partial_sum);
     cudaFree(d_component_list);
     cudaFree(d_dist_arr);
     cudaFree(d_still_running);
-    cudaFree(d_edge_weight_padded);
+    // cudaFree(d_edge_weight_padded);
     // cudaFree(d_faces);
 
     // Host memory
