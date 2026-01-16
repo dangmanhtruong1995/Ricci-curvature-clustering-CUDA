@@ -78,6 +78,8 @@ python visualize_graph_large.py
 
 **Hardware:** Experiments were performed on a PC with 64GB RAM and an NVIDIA GeForce RTX 4090 (24GB VRAM).
 
+**Benchmark:** The GPU version is compared with the Python CPU version from the GraphRicciCurvature library. The library contains code to calculate Forman-Ricci curvature, however they don't have the full code to do the clustering, so I've written code which is similar in functionality to the CUDA version. The experimental settings were inspired by those in Tian et al. 
+
 | Nodes | Clusters | Edges | P_in | P_out | Iterations | NMI | GPU Time (s) | CPU Time (s) |
 |------:|:--------:|------:|-----:|------:|:----------:|----:|-------------:|-------------:|
 | 5,000 | 2 | ~3M | 0.50 | 0.01 | 10 | 1.00 | 7.03 | 15,189.21 |
